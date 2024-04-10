@@ -1,0 +1,23 @@
+stages:
+  - build
+  - test
+
+build:
+  state: build
+  tags:
+    - windows
+  scripts:
+    - cargo make build
+  rules:
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+    - if: $CI_MERGE_REQUEST_ID
+
+build:
+  state: test
+  tags:
+    - windows
+  scripts:
+    - cargo make test
+  rules:
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+    - if: $CI_MERGE_REQUEST_ID
