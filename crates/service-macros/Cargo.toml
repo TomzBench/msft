@@ -1,0 +1,16 @@
+[package]
+name = "msft-service-macros"
+version = "0.0.3"
+authors = ["Thomas Chiantia <thomas.chiantia@gmail.com>"]
+keywords = ["windows", "service"]
+edition = "2021"
+license = "MIT"
+description = "macros for service"
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }
+
+[lib]
+proc-macro = true

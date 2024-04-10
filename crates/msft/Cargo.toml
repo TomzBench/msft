@@ -1,0 +1,67 @@
+[package]
+name = "msft"
+version = "0.0.3"
+authors = ["Thomas Chiantia <thomas.chiantia@gmail.com>"]
+keywords = ["Windows","SCM"]
+description = "Windows service API"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+msft-service = "0.0.3"
+msft-runtime = "0.0.3"
+
+# Windows dependencies
+[target.'cfg(windows)'.dependencies.windows-sys]
+version = "0.52"
+features = [
+	"Win32_Devices",
+	"Win32_Devices_Communication",
+	"Win32_Foundation",
+	"Win32_Graphics_Gdi",
+	"Win32_Security",
+	"Win32_Storage_FileSystem",
+	"Win32_System_SystemInformation",
+	"Win32_System_IO",
+	"Win32_System_Kernel",
+	"Win32_System_LibraryLoader",
+	"Win32_System_Pipes",
+	"Win32_System_Power",
+	"Win32_System_Registry",
+	"Win32_System_Rpc",
+	"Win32_System_Services",
+	"Win32_System_SystemServices",
+	"Win32_System_Threading",
+	"Win32_System_RemoteDesktop",
+	"Win32_UI_WindowsAndMessaging",
+]
+
+[dev-dependencies]
+# runtime
+tokio = { version = "1.32", features = ["full"] }
+futures = "0.3"
+pin-project = "1"
+crossbeam = "0.8"
+parking_lot = "0.12"
+
+# other
+bitflags = "2.4"
+num-traits = "0.2"
+num-derive = "0.4"
+
+# log
+tracing = "0.1"
+tracing-appender = "0.2"
+win_etw_macros = "0.1.*"
+win_etw_provider = "0.1.*"
+win_etw_tracing = "0.1.*"
+[dev-dependencies.tracing-subscriber]
+version = "0.3"
+features = [
+	"fmt", 
+	"chrono",
+	"std", 
+	"env-filter", 
+	"registry", 
+	"time"
+]

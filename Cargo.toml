@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = [
+	"crates/msft",
+	"crates/service",
+	"crates/service-macros",
+	"crates/runtime"
+]
+
+[workspace.dependencies.msft-service]
+path = "./crates/service"
+
+[workspace.dependencies.msft-service-macros]
+path = "./crates/service-macros"
+
+[workspace.dependencies.msft-runtime]
+path = "./crates/runtime"
