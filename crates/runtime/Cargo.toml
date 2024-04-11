@@ -1,6 +1,6 @@
 [package]
 name = "msft-runtime"
-version = "0.0.3"
+version = "0.0.4"
 authors = ["Thomas Chiantia <thomas@altronix.com>"]
 keywords = ["windows", "threadpool", "runtime"]
 description = "Windows async helpers"
@@ -67,14 +67,8 @@ features = [
 [dev-dependencies]
 mockall = "0.12"
 trybuild = "1"
-
-[dependencies.msft-service]
-workspace = true
-
-[[bin]]
-name = "usbmon"
-path = "src/bin/usbmon.rs"
-required-features = ["bin"]
+tracing-subscriber = "0.3"
+msft-service = "0.0.4" # used in usb example. TODO move to msft/examples
 
 [features]
 default = []

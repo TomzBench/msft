@@ -8,6 +8,11 @@ command = "cargo"
 args = ["build", "--features=bin", "--bins"]
 condition = { files_exist = ["${CARGO_MAKE_WORKING_DIRECTORY}/src/bin"] }
 
+[tasks.examples]
+command = "cargo"
+args = ["build", "--examples"]
+condition = { files_exist = ["${CARGO_MAKE_WORKING_DIRECTORY}/examples"] }
+
 [tasks.test-unit]
 command = "cargo"
 args = ["test", "--lib"]

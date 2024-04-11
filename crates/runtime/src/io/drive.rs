@@ -1,6 +1,6 @@
 //! drive
 use crate::{
-    codec::{Decode, SinkEncode, SinkEncodeLen},
+    codec::{Decode, Encode},
     io::{
         error::{SinkEncodeError, SinkError, StreamError},
         handle::ThreadpoolIoWork,
@@ -143,7 +143,7 @@ where
         item: &Item,
     ) -> Result<(), SinkEncodeError<Item::Error>>
     where
-        Item: SinkEncode + SinkEncodeLen,
+        Item: Encode,
     {
         let mut state = self.state.lock();
         match state.deref_mut() {
@@ -151,11 +151,7 @@ where
             WriteState::Flushing(_, _) => panic!("WriteState::Flushing cannot call push_encodable"),
             WriteState::Complete(_, _) => panic!("WriteState::Complete cannot call push_encodable"),
             WriteState::Writing(_, ref mut bytes) => {
-                if item.sink_encode_len() < bytes.capacity() - bytes.len() {
-                    item.sink_encode(bytes).map_err(SinkEncodeError::Encode)
-                } else {
-                    Err(SinkEncodeError::BufferFull)
-                }
+                item.encode(bytes).map_err(SinkEncodeError::Encode)
             }
         }
     }

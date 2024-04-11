@@ -1,6 +1,6 @@
 [package]
 name = "msft-service"
-version = "0.0.3"
+version = "0.0.4"
 authors = ["Thomas Chiantia <thomas@altronix.com>"]
 keywords = ["Windows","SCM"]
 description = "Windows service API"

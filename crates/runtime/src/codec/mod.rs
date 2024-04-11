@@ -26,12 +26,7 @@ pub trait Decode {
 }
 
 /// Something that can be encoded into an array of bytes
-pub trait SinkEncode {
+pub trait Encode {
     type Error: std::error::Error;
-    fn sink_encode(&self, dst: &mut bytes::BytesMut) -> Result<(), Self::Error>;
-}
-
-/// Something that knows how many bytes are needed to encode itself
-pub trait SinkEncodeLen {
-    fn sink_encode_len(&self) -> usize;
+    fn encode(&self, dst: &mut bytes::BytesMut) -> Result<(), Self::Error>;
 }

@@ -28,7 +28,7 @@ pub use overlapped::{
 };
 
 use crate::{
-    codec::{Decode, SinkEncode, SinkEncodeLen},
+    codec::{Decode, Encode},
     common::{ThreadpoolCallbackEnvironment, ThreadpoolCallbackInstance, WaitPending},
     futures::{FuturesExt, Signal, StreamExt, Watch},
 };
@@ -234,7 +234,7 @@ where
 {
     pub fn encode<Item>(&self, item: &Item) -> Result<&Self, SinkEncodeError<Item::Error>>
     where
-        Item: SinkEncode + SinkEncodeLen,
+        Item: Encode,
     {
         // Safety: We have not started future yet, so it is guarenteed to be Some
         let fut = unsafe { self.future.inner().unwrap_unchecked() };
