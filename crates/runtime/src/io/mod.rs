@@ -17,7 +17,7 @@ mod overlapped;
 #[cfg(test)]
 mod tests;
 
-pub use error::{SinkEncodeError, SinkError, StreamError};
+pub use error::{SinkError, StreamError};
 pub use futures::{DecodeStream, Flush};
 pub use handle::{
     AsRawIo, AsRawIoHandle, OwnedThreadpoolIoHandle, RawFileHandle, RawThreadpoolIoHandle,
@@ -28,7 +28,7 @@ pub use overlapped::{
 };
 
 use crate::{
-    codec::{Decode, Encode},
+    codec::Decode,
     common::{ThreadpoolCallbackEnvironment, ThreadpoolCallbackInstance, WaitPending},
     futures::{FuturesExt, Signal, StreamExt, Watch},
 };
@@ -232,16 +232,7 @@ impl<'pool, W> Sink<'pool, W>
 where
     W: WriteOverlapped,
 {
-    pub fn encode<Item>(&self, item: &Item) -> Result<&Self, SinkEncodeError<Item::Error>>
-    where
-        Item: Encode,
-    {
-        // Safety: We have not started future yet, so it is guarenteed to be Some
-        let fut = unsafe { self.future.inner().unwrap_unchecked() };
-        fut.drive().push_encodable(item).map(|_| self)
-    }
-
-    pub fn flush(self) -> Result<Watch<Flush<'pool, W>>, OverlappedError> {
+    pub fn flush(self) -> Result<Watch<Flush<'pool, W>>, SinkError> {
         // Safety: We have not started future yet, so it is guarenteed to be Some
         let fut = unsafe { self.future.inner().unwrap_unchecked() };
         // Safety: Sink is not dispursed until previous Write is completed, so access is exclusive

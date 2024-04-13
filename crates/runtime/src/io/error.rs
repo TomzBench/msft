@@ -27,21 +27,6 @@ impl From<OverlappedError> for SinkError {
 }
 
 #[derive(Debug)]
-pub enum SinkEncodeError<E> {
-    Encode(E),
-    BufferFull,
-}
-impl<E: error::Error> fmt::Display for SinkEncodeError<E> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Encode(e) => write!(f, "encoder error => {e}"),
-            Self::BufferFull => write!(f, "sink buffer full"),
-        }
-    }
-}
-impl<E: error::Error> error::Error for SinkEncodeError<E> {}
-
-#[derive(Debug)]
 pub enum StreamError<E: error::Error> {
     Overlapped(OverlappedError),
     Decode(E),

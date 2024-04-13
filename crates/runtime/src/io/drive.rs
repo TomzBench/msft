@@ -1,8 +1,8 @@
 //! drive
 use crate::{
-    codec::{Decode, Encode},
+    codec::Decode,
     io::{
-        error::{SinkEncodeError, SinkError, StreamError},
+        error::{SinkError, StreamError},
         handle::ThreadpoolIoWork,
         overlapped::{
             Overlapped, OverlappedError, ReadOverlapped, ReadOverlappedEx, WriteOverlapped,
@@ -134,24 +134,6 @@ where
                         }
                     }
                 }
-            }
-        }
-    }
-
-    pub(in crate::io) fn push_encodable<Item>(
-        &self,
-        item: &Item,
-    ) -> Result<(), SinkEncodeError<Item::Error>>
-    where
-        Item: Encode,
-    {
-        let mut state = self.state.lock();
-        match state.deref_mut() {
-            WriteState::Inert => panic!("WriteState::Inert cannot call push_encodable"),
-            WriteState::Flushing(_, _) => panic!("WriteState::Flushing cannot call push_encodable"),
-            WriteState::Complete(_, _) => panic!("WriteState::Complete cannot call push_encodable"),
-            WriteState::Writing(_, ref mut bytes) => {
-                item.encode(bytes).map_err(SinkEncodeError::Encode)
             }
         }
     }
