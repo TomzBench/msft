@@ -136,18 +136,24 @@ where
         })
     }
 
-    pub fn reader_writer(&self) -> (Reader<'_, H::Raw, D>, Writer<'_, H::Raw, D>) {
-        let reader = Reader {
+    pub fn reader(&self) -> Reader<'_, H::Raw, D> {
+        Reader {
             pool: self.pool.as_handle(),
             drive: Arc::clone(&self.drive),
             reading: None,
-        };
-        let writer = Writer {
+        }
+    }
+
+    pub fn writer(&self) -> Writer<'_, H::Raw, D> {
+        Writer {
             pool: self.pool.as_handle(),
             drive: Arc::clone(&self.drive),
             writing: None,
-        };
-        (reader, writer)
+        }
+    }
+
+    pub fn reader_writer(&self) -> (Reader<'_, H::Raw, D>, Writer<'_, H::Raw, D>) {
+        (self.reader(), self.writer())
     }
 }
 
