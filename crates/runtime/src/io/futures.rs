@@ -63,10 +63,6 @@ impl<'drive, W> Flush<'drive, W> {
     pub(in crate::io) fn new(drive: &'drive WriteDriver<W>) -> Flush<'drive, W> {
         Flush { drive }
     }
-
-    pub(in crate::io) fn drive(&self) -> &'drive WriteDriver<W> {
-        self.drive
-    }
 }
 
 impl<'drive, W> Future for Flush<'drive, W> {

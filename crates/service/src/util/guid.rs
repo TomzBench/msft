@@ -10,7 +10,7 @@ pub struct InvalidUuidString(Vec<u16>);
 impl error::Error for InvalidUuidString {}
 impl fmt::Display for InvalidUuidString {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "invalid uuid string")
+        write!(f, "invalid uuid string {:?}", self.0)
     }
 }
 

@@ -206,44 +206,17 @@ where
     W: WriteOverlapped,
     D: Decode,
 {
-    /// A future that resolves with a buffer for which to sink bytes into
-    pub async fn with_capacity(&mut self, capacity: usize) -> Sink<'_, W> {
-        self.buffer(BytesMut::with_capacity(capacity)).await
-    }
-
     /// A future that resolves when the bytes have been written
     pub async fn write<B: Into<BytesMut>>(&mut self, buffer: B) -> Result<(), SinkError> {
-        self.buffer(buffer).await.flush()?.await
-    }
-
-    pub async fn buffer<B: Into<BytesMut>>(&mut self, buffer: B) -> Sink<'_, W> {
         let (signal, future) = Flush::new(self.drive.as_ref().writer()).watch();
         if let Some(signal) = self.writing.replace(signal) {
             signal.await
         }
-        self.drive.writer().buffer(buffer.into());
-        Sink {
-            future,
-            pool: self.pool.as_handle(),
-        }
-    }
-}
-
-pub struct Sink<'pool, W> {
-    future: Watch<Flush<'pool, W>>,
-    pool: BorrowedThreadpoolIoHandle<'pool>,
-}
-
-impl<'pool, W> Sink<'pool, W>
-where
-    W: WriteOverlapped,
-{
-    pub fn flush(self) -> Result<Watch<Flush<'pool, W>>, SinkError> {
-        // Safety: We have not started future yet, so it is guarenteed to be Some
-        let fut = unsafe { self.future.inner().unwrap_unchecked() };
-        // Safety: Sink is not dispursed until previous Write is completed, so access is exclusive
-        unsafe { fut.drive().flush(&self.pool) }
-        Ok(self.future)
+        let writer = self.drive.writer();
+        writer.buffer(buffer.into());
+        // Safety: No kernel callbacks are active because we await previous writes to finish
+        unsafe { writer.flush(&self.pool) };
+        future.await
     }
 }
 
