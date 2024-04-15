@@ -464,13 +464,13 @@ dependencies = [
 
 [[package]]
 name = "msft"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "bitflags 2.5.0",
  "crossbeam",
  "futures",
- "msft-runtime 0.0.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "msft-service 0.0.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "msft-runtime 0.0.7 (registry+https://github.com/rust-lang/crates.io-index)",
+ "msft-service 0.0.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "num-derive",
  "num-traits",
  "parking_lot",
@@ -487,7 +487,7 @@ dependencies = [
 
 [[package]]
 name = "msft-runtime"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "bitflags 2.5.0",
  "bytes",
@@ -512,9 +512,9 @@ dependencies = [
 
 [[package]]
 name = "msft-runtime"
-version = "0.0.6"
+version = "0.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aef56c009dd97c968db59256f4d440ec58bee7de1e02fa859e8150c97fa66c51"
+checksum = "39efc53200063fb24c57adce09985613fa015ce01404544cb6d026bc7a51892b"
 dependencies = [
  "bitflags 2.5.0",
  "bytes",
@@ -555,13 +555,13 @@ dependencies = [
 
 [[package]]
 name = "msft-service"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "bitflags 2.5.0",
  "crossbeam",
  "futures",
  "mockall",
- "msft-service-macros 0.0.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "msft-service-macros 0.0.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "num-derive",
  "num-traits",
  "parking_lot",
@@ -579,14 +579,14 @@ dependencies = [
 
 [[package]]
 name = "msft-service"
-version = "0.0.6"
+version = "0.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29c67496dcd1cfddc2c2776e426005a31d4868fe937f0fbd7007b4da7df97d12"
+checksum = "7420e2fd17ca08ba8850700c8b0d997ff916b1f2fb89e1f0368772699c498e59"
 dependencies = [
  "bitflags 2.5.0",
  "crossbeam",
  "futures",
- "msft-service-macros 0.0.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "msft-service-macros 0.0.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "num-derive",
  "num-traits",
  "parking_lot",
@@ -609,7 +609,7 @@ dependencies = [
 
 [[package]]
 name = "msft-service-macros"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -618,9 +618,9 @@ dependencies = [
 
 [[package]]
 name = "msft-service-macros"
-version = "0.0.6"
+version = "0.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "184af28e8ca46a138e7730f569310820ee8bb6fa9295e799f2652d4581d0562b"
+checksum = "e6ef55290421e01927e09023fb35cdbc56971e9c80707cf378f7ae8bb7946ff8"
 dependencies = [
  "proc-macro2",
  "quote",

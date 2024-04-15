@@ -175,7 +175,7 @@ where
     D: Decode,
 {
     /// A future that resolves with a stream of incoming bytes.
-    pub async fn stream(&mut self) -> Watch<DecodeStream<R, D>> {
+    pub async fn stream(&mut self) -> Watch<DecodeStream<'_, R, D>> {
         let (signal, stream) = DecodeStream::new(self.drive.as_ref().reader()).watch();
         if let Some(signal) = self.reading.replace(signal) {
             debug!("waiting for previous stream to complete");
