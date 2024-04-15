@@ -1,6 +1,6 @@
 [package]
 name = "msft-runtime"
-version = "0.0.5"
+version = "0.0.6"
 authors = ["Thomas Chiantia <thomas@altronix.com>"]
 keywords = ["windows", "threadpool", "runtime"]
 description = "Windows async helpers"

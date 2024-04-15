@@ -133,7 +133,7 @@ impl WaitPool {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WaitFuture {
     shared: Arc<Mutex<Shared>>,
 }
@@ -144,22 +144,24 @@ impl Future for WaitFuture {
         let mut shared = self.shared.lock();
         let new_waker = cx.waker();
 
-        // Update our waker
-        match shared.waker.take() {
-            None => shared.waker = Some(new_waker.clone()),
-            Some(old_waker) => match old_waker.will_wake(new_waker) {
-                false => shared.waker = Some(new_waker.clone()),
-                true => shared.waker = Some(old_waker),
-            },
-        };
-
-        // If a result is ready, wake executor with result
         match shared.result {
-            None => Poll::Pending,
             Some(result) => {
-                // Safety: we are guarenteed to have a waker because we just inserted one
-                unsafe { shared.waker.take().unwrap_unchecked().wake() };
+                // If a result is ready, wake executor with result
+                if let Some(waker) = shared.waker.take() {
+                    waker.wake()
+                }
                 Poll::Ready(result)
+            }
+            None => {
+                // Update our waker
+                shared.waker = match shared.waker.take() {
+                    None => Some(new_waker.clone()),
+                    Some(old_waker) => match old_waker.will_wake(new_waker) {
+                        false => Some(new_waker.clone()),
+                        true => Some(old_waker),
+                    },
+                };
+                Poll::Pending
             }
         }
     }
