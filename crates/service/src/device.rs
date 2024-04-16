@@ -13,6 +13,7 @@ use crate::{guid, message::DeviceEvent, status::StatusHandle};
 use crossbeam::queue::SegQueue;
 use futures::Stream;
 use parking_lot::Mutex;
+use pin_project_lite::pin_project;
 use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::error;
@@ -275,6 +276,7 @@ impl From<UnexpectedRegistryData> for ScanError {
     }
 }
 
+#[derive(Copy, Clone, PartialEq)]
 pub struct UsbVidPid {
     vid: u32,
     pid: u32,
@@ -310,13 +312,17 @@ impl TryFrom<RegistryData> for UsbVidPid {
         let data = os_str
             .to_str()
             .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "unsupported registry value"))?;
-        let vid_pid = u32::from_str_radix(&data[12..16], 16).and_then(|vid| {
-            let pid = u32::from_str_radix(&data[21..25], 16)?;
-            Ok((vid, pid))
-        });
-        vid_pid
+        Self::try_from((&data[12..16], &data[21..25]))
             .map_err(|e| ScanError::InvalidRegistryData(e, os_str))
-            .map(|(vid, pid)| Self { vid, pid })
+    }
+}
+
+impl TryFrom<(&str, &str)> for UsbVidPid {
+    type Error = ParseIntError;
+    fn try_from(value: (&str, &str)) -> Result<Self, Self::Error> {
+        let vid = u32::from_str_radix(value.0, 16)?;
+        let pid = u32::from_str_radix(value.1, 16)?;
+        Ok(Self { vid, pid })
     }
 }
 
@@ -568,5 +574,105 @@ impl Stream for DeviceNotificationListener {
             None => Poll::Pending,
             Some(inner) => Poll::Ready(inner),
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct PlugEvent {
+    pub port: OsString,
+    pub ids: UsbVidPid,
+    pub kind: PlugEventKind,
+}
+
+#[derive(Debug)]
+pub enum PlugEventKind {
+    Plug,
+    Unplug,
+}
+
+pin_project! {
+    #[project = FilterForIdsProj]
+    #[project_replace = FilterForIdsProjReplace]
+    #[derive(Debug)]
+    #[must_use = "futures do nothing unless you `.await` or poll them"]
+    pub enum FilterForIds<St> {
+        Streaming {
+            #[pin]
+            inner: St,
+            ids: Vec<UsbVidPid>,
+        },
+        Complete
+    }
+}
+
+impl<St> Stream for FilterForIds<St>
+where
+    St: Stream<Item = DeviceEvent>,
+{
+    type Item = Result<PlugEvent, ScanError>;
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.as_mut().project() {
+            FilterForIdsProj::Streaming { inner, ids } => match inner.poll_next(cx) {
+                Poll::Pending => Poll::Pending,
+                Poll::Ready(Some(DeviceEvent {
+                    ty: DeviceEventType::Arrival,
+                    data: DeviceEventData::Port(port),
+                    ..
+                })) => scan_for(&port).map_or_else(
+                    |e| Poll::Ready(Some(Err(e))),
+                    |scan| match ids
+                        .iter()
+                        .find(|id| if scan == **id { true } else { false })
+                    {
+                        Some(_) => Poll::Ready(Some(Ok(PlugEvent {
+                            kind: PlugEventKind::Plug,
+                            port,
+                            ids: scan,
+                        }))),
+                        None => Poll::Pending,
+                    },
+                ),
+                Poll::Ready(Some(DeviceEvent {
+                    ty: DeviceEventType::RemoveComplete,
+                    data: DeviceEventData::Port(port),
+                    ..
+                })) => scan_for(&port).map_or_else(
+                    |e| Poll::Ready(Some(Err(e))),
+                    |scan| match ids
+                        .iter()
+                        .find(|id| if scan == **id { true } else { false })
+                    {
+                        Some(_) => Poll::Ready(Some(Ok(PlugEvent {
+                            kind: PlugEventKind::Unplug,
+                            port,
+                            ids: scan,
+                        }))),
+                        None => Poll::Pending,
+                    },
+                ),
+                Poll::Ready(Some(_)) => Poll::Pending,
+                Poll::Ready(None) => {
+                    self.project_replace(Self::Complete);
+                    Poll::Ready(None)
+                }
+            },
+            FilterForIdsProj::Complete => {
+                panic!("Watch must not be polled after stream has finished")
+            }
+        }
+    }
+}
+
+impl<T: ?Sized> UsbStreamExt for T where T: Stream<Item = DeviceEvent> {}
+
+pub trait UsbStreamExt: Stream<Item = DeviceEvent> {
+    fn filter_for_ids(self, ids: Vec<(&str, &str)>) -> Result<FilterForIds<Self>, ParseIntError>
+    where
+        Self: Sized,
+    {
+        ids.into_iter()
+            .map(UsbVidPid::try_from)
+            .collect::<Result<Vec<UsbVidPid>, ParseIntError>>()
+            .map(|ids| FilterForIds::Streaming { inner: self, ids })
     }
 }

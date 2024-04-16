@@ -59,6 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         writer.write(format!("Hello {count}\r\n").as_str()).await?;
     }
 
+    info!("demo finished");
     Ok(())
 }
 
