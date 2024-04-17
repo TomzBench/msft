@@ -464,13 +464,13 @@ dependencies = [
 
 [[package]]
 name = "msft"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "bitflags 2.5.0",
  "crossbeam",
  "futures",
- "msft-runtime 0.0.9 (registry+https://github.com/rust-lang/crates.io-index)",
- "msft-service 0.0.9 (registry+https://github.com/rust-lang/crates.io-index)",
+ "msft-runtime 0.0.10 (registry+https://github.com/rust-lang/crates.io-index)",
+ "msft-service 0.0.10 (registry+https://github.com/rust-lang/crates.io-index)",
  "num-derive",
  "num-traits",
  "parking_lot",
@@ -487,14 +487,14 @@ dependencies = [
 
 [[package]]
 name = "msft-runtime"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "bitflags 2.5.0",
  "bytes",
  "crossbeam",
  "futures",
  "mockall",
- "msft-service 0.0.9 (registry+https://github.com/rust-lang/crates.io-index)",
+ "msft-service 0.0.10 (registry+https://github.com/rust-lang/crates.io-index)",
  "num-derive",
  "num-traits",
  "parking_lot",
@@ -512,9 +512,9 @@ dependencies = [
 
 [[package]]
 name = "msft-runtime"
-version = "0.0.9"
+version = "0.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "329991384041e6803e3ea33cfaf4f3ed1189cea372c95183986c3c3b5a93bf02"
+checksum = "2101ecdc9e6873c8131982bc5848d1ef514fdf2ebb81d48566b755383128517a"
 dependencies = [
  "bitflags 2.5.0",
  "bytes",
@@ -531,13 +531,13 @@ dependencies = [
 
 [[package]]
 name = "msft-service"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "bitflags 2.5.0",
  "crossbeam",
  "futures",
  "mockall",
- "msft-service-macros 0.0.9 (registry+https://github.com/rust-lang/crates.io-index)",
+ "msft-service-macros 0.0.10 (registry+https://github.com/rust-lang/crates.io-index)",
  "num-derive",
  "num-traits",
  "parking_lot",
@@ -555,14 +555,14 @@ dependencies = [
 
 [[package]]
 name = "msft-service"
-version = "0.0.9"
+version = "0.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e069833e51825c2d85fbfa20b395af8a4817e6781abdcdb3d05c1da48a595ece"
+checksum = "559db7be594d732c11927ffc7a66aded682a90f435983aeb2acd9c9cd3a5dcec"
 dependencies = [
  "bitflags 2.5.0",
  "crossbeam",
  "futures",
- "msft-service-macros 0.0.9 (registry+https://github.com/rust-lang/crates.io-index)",
+ "msft-service-macros 0.0.10 (registry+https://github.com/rust-lang/crates.io-index)",
  "num-derive",
  "num-traits",
  "parking_lot",
@@ -579,7 +579,7 @@ dependencies = [
 
 [[package]]
 name = "msft-service-macros"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -588,9 +588,9 @@ dependencies = [
 
 [[package]]
 name = "msft-service-macros"
-version = "0.0.9"
+version = "0.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28f440f890a7eae41d0802a77f7c2114df10569d9d999232fef7f2b1a6ea0ae3"
+checksum = "3486cb85e21a601d2cb708383ada10cde375ecc6fe5f48f18a59ebe5a11e218e"
 dependencies = [
  "proc-macro2",
  "quote",

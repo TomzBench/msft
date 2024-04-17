@@ -162,6 +162,9 @@ impl<W> WriteDriver<W> {
     }
 }
 
+/// NOTE UnsafeCell strips Syncness. However, we guarentee exclusive access so we add back syncness
+unsafe impl<W> Sync for WriteDriver<W> where W: Sync {}
+
 enum WriteState {
     Inert,
     Writing(Option<Waker>, BytesMut),
@@ -309,6 +312,14 @@ where
             None => Poll::Pending,
         }
     }
+}
+
+/// NOTE UnsafeCell strips Syncness. However, we guarentee exclusive access so we add back syncness
+unsafe impl<R, D> Sync for ReadDriver<R, D>
+where
+    R: Sync,
+    D: Decode + Sync,
+{
 }
 
 struct Reader<R, D> {

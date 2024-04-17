@@ -110,6 +110,10 @@ impl AsRawHandle for RawFileHandle {
     }
 }
 
+// Windows handles can be shared across threads
+unsafe impl Send for RawFileHandle {}
+unsafe impl Sync for RawFileHandle {}
+
 pub trait AsRawIoHandle {
     fn as_raw_io_handle(&self) -> HANDLE;
 }

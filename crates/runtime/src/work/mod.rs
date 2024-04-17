@@ -293,6 +293,9 @@ impl<W: WorkOnceFn> Oneshot<W> {
     }
 }
 
+/// NOTE UnsafeCell strips Syncness. However, we guarentee exclusive access so we add back syncness
+unsafe impl<W: WorkOnceFn> Sync for Oneshot<W> where W: Sync {}
+
 /// We run the callers callback (only once!)
 pub unsafe extern "system" fn work_once_callback<W>(
     instance: PTP_CALLBACK_INSTANCE,
