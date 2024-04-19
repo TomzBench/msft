@@ -24,19 +24,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Application service starting...");
 
     // Look for a single event associated with vendor/product of interest
-    let ev = NotificationRegistry::with_capacity(3)
+    let mut stream = NotificationRegistry::with_capacity(3)
         .with(NotificationRegistry::WCEUSBS)
         .with(NotificationRegistry::USBDEVICE)
         .with(NotificationRegistry::PORTS)
         .start("MyDeviceNotifications")?
-        .filter_for_ids(vec![("2FE3", "0001")])?
-        .take(1)
-        .next()
-        .await
-        .unwrap()?;
+        .filter_for_ids(vec![("2FE3", "0100")])?;
 
-    // Log the event
-    debug!(?ev, "found usb event");
+    while let Some(ev) = stream.next().await {
+        // Log the event
+        debug!(?ev, "found usb event");
+    }
 
     Ok(())
 }

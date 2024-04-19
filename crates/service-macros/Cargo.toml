@@ -1,6 +1,6 @@
 [package]
 name = "msft-service-macros"
-version = "0.0.12"
+version = "0.0.14"
 authors = ["Thomas Chiantia <thomas.chiantia@gmail.com>"]
 keywords = ["windows", "service"]
 edition = "2021"

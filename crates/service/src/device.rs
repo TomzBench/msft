@@ -26,6 +26,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::thread::JoinHandle;
 use std::{io, task::Waker};
+use tracing::debug;
 use tracing::{error, trace};
 use windows_sys::core::GUID;
 use windows_sys::Win32::Foundation::*;
@@ -53,6 +54,7 @@ unsafe extern "system" fn device_notification_window_proceedure(
             // Safety: lparam is a DEV_BROADCAST_HDR when msg is WM_DEVICECHANGE
             WM_DEVICECHANGE => match unsafe { DeviceEvent::try_parse(wparam as _, lparam as _) } {
                 Some(msg) => {
+                    debug!(?msg.ty);
                     (&*ptr).lock().try_wake_with(Some(msg));
                     0
                 }
@@ -475,6 +477,7 @@ impl DeviceNotificationData {
         let queue = SegQueue::new();
         let devices = self::scan()?;
         for (port, _vidpid) in devices.into_iter() {
+            debug!(?port, "found existing USB device");
             queue.push(Some(DeviceEvent {
                 ty: DeviceEventType::Arrival,
                 data: DeviceEventData::Port(port),
@@ -570,24 +573,30 @@ impl Stream for DeviceNotificationListener {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut context = self.context.lock();
         context.register(cx);
+        debug!(
+            len = context.queue.len(),
+            waker = context.waker.is_some(),
+            "DeviceNotificationListener poll"
+        );
+
         match context.queue.pop() {
             None => Poll::Pending,
-            Some(inner) => Poll::Ready(inner),
+            Some(Some(inner)) => {
+                debug!(ev=?inner.ty, "usb event");
+                Poll::Ready(Some(inner))
+            }
+            Some(None) => {
+                debug!("DeviceNotificationListener stream end");
+                Poll::Ready(None)
+            }
         }
     }
 }
 
 #[derive(Debug)]
-pub struct PlugEvent {
-    pub port: OsString,
-    pub ids: UsbVidPid,
-    pub kind: PlugEventKind,
-}
-
-#[derive(Debug)]
-pub enum PlugEventKind {
-    Plug,
-    Unplug,
+pub enum PlugEvent {
+    Plug { port: OsString, ids: UsbVidPid },
+    Unplug { port: OsString },
 }
 
 pin_project! {
@@ -611,53 +620,41 @@ where
 {
     type Item = Result<PlugEvent, ScanError>;
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match self.as_mut().project() {
-            FilterForIdsProj::Streaming { inner, ids } => match inner.poll_next(cx) {
-                Poll::Pending => Poll::Pending,
-                Poll::Ready(Some(DeviceEvent {
-                    ty: DeviceEventType::Arrival,
-                    data: DeviceEventData::Port(port),
-                    ..
-                })) => scan_for(&port).map_or_else(
-                    |e| Poll::Ready(Some(Err(e))),
-                    |scan| match ids
-                        .iter()
-                        .find(|id| if scan == **id { true } else { false })
-                    {
-                        Some(_) => Poll::Ready(Some(Ok(PlugEvent {
-                            kind: PlugEventKind::Plug,
-                            port,
-                            ids: scan,
-                        }))),
-                        None => Poll::Pending,
-                    },
-                ),
-                Poll::Ready(Some(DeviceEvent {
-                    ty: DeviceEventType::RemoveComplete,
-                    data: DeviceEventData::Port(port),
-                    ..
-                })) => scan_for(&port).map_or_else(
-                    |e| Poll::Ready(Some(Err(e))),
-                    |scan| match ids
-                        .iter()
-                        .find(|id| if scan == **id { true } else { false })
-                    {
-                        Some(_) => Poll::Ready(Some(Ok(PlugEvent {
-                            kind: PlugEventKind::Unplug,
-                            port,
-                            ids: scan,
-                        }))),
-                        None => Poll::Pending,
-                    },
-                ),
-                Poll::Ready(Some(_)) => Poll::Pending,
-                Poll::Ready(None) => {
-                    self.project_replace(Self::Complete);
-                    Poll::Ready(None)
+        loop {
+            match self.as_mut().project() {
+                FilterForIdsProj::Streaming { inner, ids } => match inner.poll_next(cx) {
+                    Poll::Pending => break Poll::Pending,
+                    Poll::Ready(Some(DeviceEvent {
+                        ty: DeviceEventType::Arrival,
+                        data: DeviceEventData::Port(port),
+                        ..
+                    })) => {
+                        if let Ok(Some(scan)) = scan_for(&port).map(|scan| {
+                            ids.iter().find_map(|id| match id {
+                                value if *value == scan => Some(scan),
+                                _ => None,
+                            })
+                        }) {
+                            debug!(?port, ?scan, "found usb device");
+                            break Poll::Ready(Some(Ok(PlugEvent::Plug { port, ids: scan })));
+                        } else {
+                            debug!(?port, "ignoring usb device");
+                        }
+                    }
+                    Poll::Ready(Some(DeviceEvent {
+                        ty: DeviceEventType::RemoveComplete,
+                        data: DeviceEventData::Port(port),
+                        ..
+                    })) => break Poll::Ready(Some(Ok(PlugEvent::Unplug { port }))),
+                    Poll::Ready(Some(_)) => break Poll::Pending,
+                    Poll::Ready(None) => {
+                        self.project_replace(Self::Complete);
+                        break Poll::Ready(None);
+                    }
+                },
+                FilterForIdsProj::Complete => {
+                    panic!("Watch must not be polled after stream has finished")
                 }
-            },
-            FilterForIdsProj::Complete => {
-                panic!("Watch must not be polled after stream has finished")
             }
         }
     }
