@@ -1,6 +1,6 @@
 [package]
 name = "msft-runtime"
-version = "0.0.11"
+version = "0.0.12"
 authors = ["Thomas Chiantia <thomas@altronix.com>"]
 keywords = ["windows", "threadpool", "runtime"]
 description = "Windows async helpers"
@@ -68,7 +68,7 @@ features = [
 mockall = "0.12"
 trybuild = "1"
 tracing-subscriber = "0.3"
-msft-service = "0.0.11" # used in usb example. TODO move to msft/examples
+msft-service = "0.0.12" # used in usb example. TODO move to msft/examples
 
 [features]
 default = []

@@ -2,7 +2,7 @@
 use crate::{
     codec::Decode,
     io::{
-        drive::{ReadDriver, WriteDriver},
+        drive::Drive,
         error::{SinkError, StreamError},
         overlapped::ReadOverlapped,
     },
@@ -10,27 +10,30 @@ use crate::{
 use futures::{Future, Stream};
 use std::{
     pin::Pin,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     task::{Context, Poll},
 };
 
-pub struct DecodeStream<'drive, R, D>
+pub struct DecodeStream<R, D>
 where
     R: ReadOverlapped,
     D: Decode,
 {
     /// Shared state between the stream and the threadpool
-    drive: &'drive ReadDriver<R, D>,
+    drive: Arc<Drive<R, D>>,
     /// Stream ended, because we overflowed the queue, or the remote stream has been closed
     overflow: AtomicBool,
 }
 
-impl<'drive, R, D> DecodeStream<'drive, R, D>
+impl<R, D> DecodeStream<R, D>
 where
     R: ReadOverlapped,
     D: Decode,
 {
-    pub(in crate::io) fn new(drive: &'drive ReadDriver<R, D>) -> Self {
+    pub(in crate::io) fn new(drive: Arc<Drive<R, D>>) -> Self {
         Self {
             drive,
             overflow: AtomicBool::new(false),
@@ -38,14 +41,14 @@ where
     }
 }
 
-impl<R, D> Stream for DecodeStream<'_, R, D>
+impl<R, D> Stream for DecodeStream<R, D>
 where
     R: ReadOverlapped,
     D: Decode,
 {
     type Item = Result<D::Item, StreamError<D::Error>>;
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let next = self.drive.poll_next(cx);
+        let next = self.drive.reader().poll_next(cx);
         if let Poll::Ready(Some(Err(StreamError::QueueFull))) = next {
             self.overflow.store(true, Ordering::SeqCst);
             Poll::Ready(None)
@@ -55,19 +58,28 @@ where
     }
 }
 
-pub struct Flush<'drive, W> {
-    drive: &'drive WriteDriver<W>,
+pub struct Flush<W, D>
+where
+    D: Decode,
+{
+    drive: Arc<Drive<W, D>>,
 }
 
-impl<'drive, W> Flush<'drive, W> {
-    pub(in crate::io) fn new(drive: &'drive WriteDriver<W>) -> Flush<'drive, W> {
+impl<W, D> Flush<W, D>
+where
+    D: Decode,
+{
+    pub(in crate::io) fn new(drive: Arc<Drive<W, D>>) -> Flush<W, D> {
         Flush { drive }
     }
 }
 
-impl<'drive, W> Future for Flush<'drive, W> {
+impl<W, D> Future for Flush<W, D>
+where
+    D: Decode,
+{
     type Output = Result<(), SinkError>;
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.drive.poll(cx)
+        self.drive.writer().poll(cx)
     }
 }

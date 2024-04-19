@@ -1,6 +1,6 @@
 [package]
 name = "msft"
-version = "0.0.11"
+version = "0.0.12"
 authors = ["Thomas Chiantia <thomas.chiantia@gmail.com>"]
 keywords = ["Windows","SCM"]
 description = "Windows service API"
@@ -8,8 +8,8 @@ edition = "2021"
 license = "MIT"
 
 [dependencies]
-msft-service = "0.0.11"
-msft-runtime = "0.0.11"
+msft-service = "0.0.12"
+msft-runtime = "0.0.12"
 
 # Windows dependencies
 [target.'cfg(windows)'.dependencies.windows-sys]

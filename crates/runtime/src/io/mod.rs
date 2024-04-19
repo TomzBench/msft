@@ -175,8 +175,9 @@ where
     D: Decode,
 {
     /// A future that resolves with a stream of incoming bytes.
-    pub async fn stream(&mut self) -> Watch<DecodeStream<'_, R, D>> {
-        let (signal, stream) = DecodeStream::new(self.drive.as_ref().reader()).watch();
+    pub async fn stream(&mut self) -> Watch<DecodeStream<R, D>> {
+        let drive = Arc::clone(&self.drive);
+        let (signal, stream) = DecodeStream::new(drive).watch();
         if let Some(signal) = self.reading.replace(signal) {
             debug!("waiting for previous stream to complete");
             signal.await;
@@ -208,7 +209,8 @@ where
 {
     /// A future that resolves when the bytes have been written
     pub async fn write<B: Into<BytesMut>>(&mut self, buffer: B) -> Result<(), SinkError> {
-        let (signal, future) = Flush::new(self.drive.as_ref().writer()).watch();
+        let drive = Arc::clone(&self.drive);
+        let (signal, future) = Flush::new(drive).watch();
         if let Some(signal) = self.writing.replace(signal) {
             signal.await
         }

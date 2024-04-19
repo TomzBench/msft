@@ -20,6 +20,8 @@ use std::{
 use tracing::debug;
 use windows_sys::Win32::Foundation::ERROR_SUCCESS;
 
+/// TODO reader/writer should be Arc's so we can give out clones instead of references. This allows
+/// for cleaner impl Stream for ...
 pub(in crate::io) struct Drive<H, D>
 where
     D: Decode,

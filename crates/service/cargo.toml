@@ -1,6 +1,6 @@
 [package]
 name = "msft-service"
-version = "0.0.11"
+version = "0.0.12"
 authors = ["Thomas Chiantia <thomas@altronix.com>"]
 keywords = ["Windows","SCM"]
 description = "Windows service API"
@@ -8,7 +8,7 @@ edition = "2021"
 license = "MIT"
 
 [dependencies.msft-service-macros]
-version = "0.0.11"
+version = "0.0.12"
 
 [dependencies]
 # runtime
