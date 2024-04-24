@@ -328,6 +328,20 @@ impl TryFrom<(&str, &str)> for UsbVidPid {
     }
 }
 
+#[cfg(feature = "serde")]
+impl serde::Serialize for UsbVidPid {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("UsbVidPid", 2)?;
+        state.serialize_field("vid", &self.vid())?;
+        state.serialize_field("pid", &self.pid())?;
+        state.end()
+    }
+}
+
 /// A RAII guard for a window which will destroy the window when dropped
 pub struct Window(HWND);
 impl Drop for Window {

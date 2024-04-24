@@ -3,6 +3,10 @@
 [env]
 CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
 
+[tasks.full]
+command = "cargo"
+args = ["build", "--all-features"]
+
 [tasks.binaries]
 command = "cargo"
 args = ["build", "--features=bin", "--bins"]

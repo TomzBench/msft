@@ -1,6 +1,6 @@
 [package]
 name = "msft-service"
-version = "0.0.14"
+version = "0.0.16"
 authors = ["Thomas Chiantia <thomas@altronix.com>"]
 keywords = ["Windows","SCM"]
 description = "Windows service API"
@@ -8,7 +8,7 @@ edition = "2021"
 license = "MIT"
 
 [dependencies.msft-service-macros]
-version = "0.0.14"
+version = "0.0.16"
 
 [dependencies]
 # runtime
@@ -22,6 +22,7 @@ parking_lot = "0.12"
 bitflags = "2.4"
 num-traits = "0.2"
 num-derive = "0.4"
+serde = { version = "1", optional = true }
 
 # log
 tracing = "0.1"
@@ -82,6 +83,7 @@ required-features = ["bin"]
 
 [features]
 default = []
+serde = ["dep:serde"]
 bin = [
 	"dep:tracing-appender", 
 	"dep:tracing-subscriber",
