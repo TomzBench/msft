@@ -14,6 +14,7 @@ use crossbeam::queue::SegQueue;
 use futures::Stream;
 use parking_lot::Mutex;
 use pin_project_lite::pin_project;
+use std::borrow::Cow;
 use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::error;
@@ -319,11 +320,15 @@ impl TryFrom<RegistryData> for UsbVidPid {
     }
 }
 
-impl TryFrom<(&str, &str)> for UsbVidPid {
+impl<'v, 'p, V, P> TryFrom<(V, P)> for UsbVidPid
+where
+    V: Into<Cow<'v, str>>,
+    P: Into<Cow<'p, str>>,
+{
     type Error = ParseIntError;
-    fn try_from(value: (&str, &str)) -> Result<Self, Self::Error> {
-        let vid = u32::from_str_radix(value.0, 16)?;
-        let pid = u32::from_str_radix(value.1, 16)?;
+    fn try_from((vid, pid): (V, P)) -> Result<Self, Self::Error> {
+        let vid = u32::from_str_radix(&vid.into(), 16)?;
+        let pid = u32::from_str_radix(&pid.into(), 16)?;
         Ok(Self { vid, pid })
     }
 }
@@ -677,8 +682,13 @@ where
 impl<T: ?Sized> UsbStreamExt for T where T: Stream<Item = DeviceEvent> {}
 
 pub trait UsbStreamExt: Stream<Item = DeviceEvent> {
-    fn filter_for_ids(self, ids: Vec<(&str, &str)>) -> Result<FilterForIds<Self>, ParseIntError>
+    fn filter_for_ids<'v, 'p, V, P>(
+        self,
+        ids: Vec<(V, P)>,
+    ) -> Result<FilterForIds<Self>, ParseIntError>
     where
+        V: Into<Cow<'v, str>>,
+        P: Into<Cow<'p, str>>,
         Self: Sized,
     {
         ids.into_iter()
