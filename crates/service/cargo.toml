@@ -1,6 +1,6 @@
 [package]
 name = "msft-service"
-version = "0.0.18"
+version = "0.0.21"
 authors = ["Thomas Chiantia <thomas@altronix.com>"]
 keywords = ["Windows","SCM"]
 description = "Windows service API"
@@ -8,7 +8,10 @@ edition = "2021"
 license = "MIT"
 
 [dependencies.msft-service-macros]
-version = "0.0.18"
+version = "0.0.21"
+
+[dependencies.msft-runtime]
+version = "0.0.21"
 
 [dependencies]
 # runtime
@@ -23,6 +26,7 @@ bitflags = "2.4"
 num-traits = "0.2"
 num-derive = "0.4"
 serde = { version = "1", optional = true }
+thiserror = "1"
 
 # log
 tracing = "0.1"
@@ -89,5 +93,5 @@ bin = [
 	"dep:tracing-subscriber",
 	"dep:win_etw_macros",
 	"dep:win_etw_provider",
-	"dep:win_etw_tracing"
+	"dep:win_etw_tracing",
 ]

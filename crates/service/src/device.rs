@@ -11,28 +11,35 @@ use crate::util::hkey::{RegistryData, UnexpectedRegistryData};
 use crate::util::wchar::{from_wide, to_wide};
 use crate::{guid, message::DeviceEvent, status::StatusHandle};
 use crossbeam::queue::SegQueue;
-use futures::Stream;
+use futures::{ready, Future, Stream};
+use msft_runtime::{
+    event::{self, Event, EventInitialState, EventReset, OwnedEventHandle},
+    usb::OpenFuture,
+    wait::{WaitFuture, WaitPool},
+};
+use msft_runtime::{io::ThreadpoolError, usb::UsbHandle};
 use parking_lot::Mutex;
 use pin_project_lite::pin_project;
-use std::borrow::Cow;
-use std::cell::OnceCell;
-use std::collections::HashMap;
-use std::error;
-use std::ffi::OsString;
-use std::fmt::{self, Formatter};
-use std::num::ParseIntError;
-use std::os::windows::io::{AsRawHandle, RawHandle};
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
-use std::thread::JoinHandle;
-use std::{io, task::Waker};
-use tracing::debug;
-use tracing::{error, trace};
-use windows_sys::core::GUID;
-use windows_sys::Win32::Foundation::*;
-use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::UI::WindowsAndMessaging::*;
+use std::{
+    borrow::Cow,
+    cell::OnceCell,
+    collections::HashMap,
+    error,
+    ffi::OsString,
+    fmt::{self, Formatter},
+    io,
+    num::ParseIntError,
+    os::windows::io::{AsRawHandle, RawHandle},
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll, Waker},
+    thread::JoinHandle,
+};
+use tracing::{debug, error, trace};
+use windows_sys::{
+    core::GUID,
+    Win32::{Foundation::*, System::LibraryLoader::GetModuleHandleW, UI::WindowsAndMessaging::*},
+};
 
 /// Creating Windows requires the hinstance prop of the WinMain function. To retreive this
 /// parameter use [`windows_sys::Win32::System::LibraryLoader::GetModuleHandleW`];
@@ -619,6 +626,74 @@ pub enum PlugEvent {
 }
 
 pin_project! {
+    #[project = TryOpenProj]
+    #[must_use = "futures do nothing unless you `.await` or poll them"]
+    pub struct TryOpen<F, St> {
+        map: HashMap<OsString, (WaitPool, OwnedEventHandle)>,
+        func: F,
+        #[pin]
+        inner: St,
+        #[pin]
+        opening: Option<OpenFuture>,
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum TryOpenError<E: error::Error> {
+    #[error("scan error => {0}")]
+    Scan(#[from] ScanError),
+    #[error("runtime error => {0}")]
+    Runtime(#[from] ThreadpoolError<E>),
+    #[error("io error => {0}")]
+    Io(#[from] io::Error),
+}
+
+impl<T, E, F, St> Stream for TryOpen<F, St>
+where
+    E: error::Error,
+    F: FnMut(UsbHandle, WaitFuture) -> Result<T, TryOpenError<E>>,
+    St: Stream<Item = Result<PlugEvent, ScanError>>,
+{
+    type Item = Result<T, TryOpenError<E>>;
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let mut this = self.project();
+        loop {
+            if let Some(opening) = this.opening.as_mut().as_pin_mut() {
+                let result = ready!(opening.poll(cx));
+                this.opening.set(None);
+                break Poll::Ready(match result {
+                    Err(e) => Some(Err(e.into())),
+                    Ok(h) => Some(WaitPool::new().map_err(|e| e.into()).and_then(|mut pool| {
+                        let event = event::anonymous(EventReset::Manual, EventInitialState::Unset)?;
+                        let signal = pool.start(event.as_raw_handle() as _, None);
+                        this.map.insert(h.port.clone(), (pool, event));
+                        (this.func)(h, signal)
+                    })),
+                });
+            } else {
+                match ready!(this.inner.as_mut().poll_next(cx)) {
+                    Some(Ok(PlugEvent::Plug { port, .. })) => match msft_runtime::usb::open(port) {
+                        Ok(fut) => this.opening.set(Some(fut)),
+                        Err(e) => break Poll::Ready(Some(Err(e.into()))),
+                    },
+                    Some(Ok(PlugEvent::Unplug { port })) => match this.map.remove(&port) {
+                        None => break Poll::Pending,
+                        Some((_pool, signal)) => {
+                            break signal.set().map_or_else(
+                                |e| Poll::Ready(Some(Err(e.into()))),
+                                |_| Poll::Pending,
+                            )
+                        }
+                    },
+                    Some(Err(e)) => break Poll::Ready(Some(Err(e.into()))),
+                    None => break Poll::Ready(None),
+                }
+            }
+        }
+    }
+}
+
+pin_project! {
     #[project = FilterForIdsProj]
     #[project_replace = FilterForIdsProjReplace]
     #[derive(Debug)]
@@ -679,9 +754,7 @@ where
     }
 }
 
-impl<T: ?Sized> UsbStreamExt for T where T: Stream<Item = DeviceEvent> {}
-
-pub trait UsbStreamExt: Stream<Item = DeviceEvent> {
+pub trait DeviceStreamExt: Stream<Item = DeviceEvent> {
     fn filter_for_ids<'v, 'p, V, P>(
         self,
         ids: Vec<(V, P)>,
@@ -696,4 +769,29 @@ pub trait UsbStreamExt: Stream<Item = DeviceEvent> {
             .collect::<Result<Vec<UsbVidPid>, ParseIntError>>()
             .map(|ids| FilterForIds::Streaming { inner: self, ids })
     }
+}
+
+impl<T: ?Sized> DeviceStreamExt for T where T: Stream<Item = DeviceEvent> {}
+
+pub trait UsbStreamExt: Stream<Item = Result<PlugEvent, ScanError>> {
+    fn try_open<F, T, E>(self, func: F) -> TryOpen<F, Self>
+    where
+        E: error::Error,
+        F: FnMut(UsbHandle, WaitFuture) -> Result<T, TryOpenError<E>>,
+        Self: Sized,
+    {
+        TryOpen {
+            map: HashMap::new(),
+            func,
+            inner: self,
+            opening: None,
+        }
+    }
+}
+
+impl<T: ?Sized> UsbStreamExt for T where T: Stream<Item = Result<PlugEvent, ScanError>> {}
+
+pub mod prelude {
+    pub use super::DeviceStreamExt;
+    pub use super::UsbStreamExt;
 }

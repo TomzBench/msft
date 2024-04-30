@@ -31,11 +31,16 @@ impl WorkOnceFn for OpenWork {
     type Output = io::Result<UsbHandle>;
     fn work_once(self, _instance: ThreadpoolCallbackInstance) -> Self::Output {
         // Read out the port name
-        let port: Vec<u16> = self.port.encode_wide().chain(Some(0).into_iter()).collect();
+        let wstr: Vec<u16> = self
+            .port
+            .clone()
+            .encode_wide()
+            .chain(Some(0).into_iter())
+            .collect();
         // Open the file port
         match unsafe {
             CreateFileW(
-                port.as_ptr(),
+                wstr.as_ptr(),
                 GENERIC_READ | GENERIC_WRITE, // desired access
                 0,                            // exclusive access
                 std::ptr::null(),             // default sec attributes
@@ -45,7 +50,12 @@ impl WorkOnceFn for OpenWork {
             )
         } {
             INVALID_HANDLE_VALUE => Err(io::Error::last_os_error()),
-            hcom => Ok(unsafe { UsbHandle(OwnedHandle::from_raw_handle(hcom as _)) }),
+            hcom => Ok(unsafe {
+                UsbHandle {
+                    port: self.port,
+                    handle: OwnedHandle::from_raw_handle(hcom as _),
+                }
+            }),
         }
     }
 }
@@ -351,11 +361,14 @@ impl fmt::Debug for Dcb {
 }
 
 /// A raw USB handle that has yet to be configured as a USB TTY device
-pub struct UsbHandle(OwnedHandle);
+pub struct UsbHandle {
+    pub port: OsString,
+    handle: OwnedHandle,
+}
 impl UsbHandle {
     pub fn configure(self, config: DeviceControlSettings) -> io::Result<ConfiguredUsb> {
         let mut dcb: DCB = unsafe { std::mem::zeroed() };
-        match unsafe { GetCommState(self.0.as_raw_handle() as _, &mut dcb) } {
+        match unsafe { GetCommState(self.handle.as_raw_handle() as _, &mut dcb) } {
             0 => Err(io::Error::last_os_error()),
             _ => Ok(()),
         }?;
@@ -400,7 +413,7 @@ impl UsbHandle {
         dcb.ByteSize = config.bytes;
         dcb.Parity = config.parity as _;
         dcb.StopBits = config.stop as _;
-        match unsafe { SetCommState(self.0.as_raw_handle() as _, &mut dcb) } {
+        match unsafe { SetCommState(self.handle.as_raw_handle() as _, &mut dcb) } {
             0 => Err(io::Error::last_os_error()),
             _ => Ok(()),
         }?;
@@ -413,15 +426,21 @@ impl UsbHandle {
             WriteTotalTimeoutConstant: 0,
             WriteTotalTimeoutMultiplier: 0,
         };
-        match unsafe { SetCommTimeouts(self.0.as_raw_handle() as _, &timeouts) } {
+        match unsafe { SetCommTimeouts(self.handle.as_raw_handle() as _, &timeouts) } {
             0 => Err(io::Error::last_os_error()),
-            _ => Ok(ConfiguredUsb(self.0)),
+            _ => Ok(ConfiguredUsb {
+                port: self.port,
+                handle: self.handle,
+            }),
         }
     }
 }
 
 /// A configured UsbHandle not ready for Async IO
-pub struct ConfiguredUsb(OwnedHandle);
+pub struct ConfiguredUsb {
+    pub port: OsString,
+    handle: OwnedHandle,
+}
 impl ConfiguredUsb {
     pub fn run<D>(
         self,
@@ -430,6 +449,6 @@ impl ConfiguredUsb {
     where
         D: Decode,
     {
-        ThreadpoolIo::new(self.0, options)
+        ThreadpoolIo::new(self.handle, options)
     }
 }
