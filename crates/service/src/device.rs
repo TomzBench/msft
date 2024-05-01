@@ -626,6 +626,17 @@ pub enum PlugEvent {
 }
 
 pin_project! {
+    #[project = OpeningProj]
+    #[must_use = "futures do nothing unless you `.await` or poll them"]
+    struct Opening {
+        port: OsString,
+        ids: UsbVidPid,
+        #[pin]
+        fut: OpenFuture,
+    }
+}
+
+pin_project! {
     #[project = TryOpenProj]
     #[must_use = "futures do nothing unless you `.await` or poll them"]
     pub struct TryOpen<F, St> {
@@ -634,7 +645,7 @@ pin_project! {
         #[pin]
         inner: St,
         #[pin]
-        opening: Option<OpenFuture>,
+        opening: Option<Opening>,
     }
 }
 
@@ -651,7 +662,7 @@ pub enum TryOpenError<E: error::Error> {
 impl<T, E, F, St> Stream for TryOpen<F, St>
 where
     E: error::Error,
-    F: FnMut(UsbHandle, WaitFuture) -> Result<T, TryOpenError<E>>,
+    F: FnMut(UsbHandle, WaitFuture, OsString, UsbVidPid) -> Result<T, TryOpenError<E>>,
     St: Stream<Item = Result<PlugEvent, ScanError>>,
 {
     type Item = Result<T, TryOpenError<E>>;
@@ -659,23 +670,26 @@ where
         let mut this = self.project();
         loop {
             if let Some(opening) = this.opening.as_mut().as_pin_mut() {
-                let result = ready!(opening.poll(cx));
-                this.opening.set(None);
+                let result = ready!(opening.project().fut.poll(cx));
+                // Safety: we know we are Some because of check above
+                let Opening { port, ids, .. } = unsafe { this.opening.take().unwrap_unchecked() };
                 break Poll::Ready(match result {
                     Err(e) => Some(Err(e.into())),
                     Ok(h) => Some(WaitPool::new().map_err(|e| e.into()).and_then(|mut pool| {
                         let event = event::anonymous(EventReset::Manual, EventInitialState::Unset)?;
                         let signal = pool.start(event.as_raw_handle() as _, None);
                         this.map.insert(h.port.clone(), (pool, event));
-                        (this.func)(h, signal)
+                        (this.func)(h, signal, port, ids)
                     })),
                 });
             } else {
                 match ready!(this.inner.as_mut().poll_next(cx)) {
-                    Some(Ok(PlugEvent::Plug { port, .. })) => match msft_runtime::usb::open(port) {
-                        Ok(fut) => this.opening.set(Some(fut)),
-                        Err(e) => break Poll::Ready(Some(Err(e.into()))),
-                    },
+                    Some(Ok(PlugEvent::Plug { port, ids })) => {
+                        match msft_runtime::usb::open(port.clone()) {
+                            Ok(fut) => this.opening.set(Some(Opening { port, ids, fut })),
+                            Err(e) => break Poll::Ready(Some(Err(e.into()))),
+                        }
+                    }
                     Some(Ok(PlugEvent::Unplug { port })) => match this.map.remove(&port) {
                         None => break Poll::Pending,
                         Some((_pool, signal)) => {
@@ -777,7 +791,7 @@ pub trait UsbStreamExt: Stream<Item = Result<PlugEvent, ScanError>> {
     fn try_open<F, T, E>(self, func: F) -> TryOpen<F, Self>
     where
         E: error::Error,
-        F: FnMut(UsbHandle, WaitFuture) -> Result<T, TryOpenError<E>>,
+        F: FnMut(UsbHandle, WaitFuture, OsString, UsbVidPid) -> Result<T, TryOpenError<E>>,
         Self: Sized,
     {
         TryOpen {

@@ -31,7 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with(NotificationRegistry::PORTS)
         .start("MyDeviceNotifications")?
         .filter_for_ids(vec![("2FE3", "0001")])?
-        .try_open(|port, _| {
+        .try_open(|port, _, _, _| {
             port.configure(DeviceControlSettings::default())?
                 .run(ThreadpoolOptions {
                     environment: None,
