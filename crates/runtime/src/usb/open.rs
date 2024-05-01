@@ -420,7 +420,7 @@ impl UsbHandle {
 
         // Set timeouts
         let timeouts = COMMTIMEOUTS {
-            ReadIntervalTimeout: 100,
+            ReadIntervalTimeout: 50,
             ReadTotalTimeoutMultiplier: 0,
             ReadTotalTimeoutConstant: 0,
             WriteTotalTimeoutConstant: 0,

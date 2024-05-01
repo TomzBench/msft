@@ -244,6 +244,7 @@ where
         let reader = &mut *self.reader.get();
         match io_result {
             ERROR_SUCCESS => {
+                debug!(bytes_transferred, "io success");
                 // Update buffer with newly initialized bytes
                 reader.completion(bytes_transferred);
 
@@ -269,7 +270,7 @@ where
         P: ThreadpoolIoWork,
     {
         let capacity = self.queue.capacity();
-        debug!(capacity, "driving read");
+        debug!(capacity, "starting read");
         let reader = &mut *self.reader.get();
         match reader.start(pool) {
             Err(StreamError::Overlapped(OverlappedError::Pending)) => debug!("read pending"),
@@ -355,7 +356,7 @@ where
     ///
     /// Safety: Bytes 0..bytes_transferred must be initialized from the kernel
     unsafe fn completion(&mut self, bytes_transferred: usize) {
-        self.buf.set_len(bytes_transferred)
+        self.buf.set_len(self.buf.len() + bytes_transferred)
     }
 
     /// Decode some bytes

@@ -6,6 +6,7 @@ pub use std::{
     ops::DerefMut,
     os::windows::io::{AsRawHandle, BorrowedHandle, OwnedHandle, RawHandle},
 };
+use tracing::debug;
 use windows_sys::Win32::{
     Foundation::{GetLastError, ERROR_IO_PENDING, FALSE},
     Storage::FileSystem::ReadFile,
@@ -27,6 +28,12 @@ pub fn read_overlapped(
             overlapped.as_mut_ptr(),
         )
     };
+    debug!(
+        len = bytes.len(),
+        cap = bytes.capacity(),
+        bytes_read,
+        result
+    );
     match result {
         FALSE => match unsafe { GetLastError() } {
             ERROR_IO_PENDING => Err(OverlappedError::Pending),
