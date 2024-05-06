@@ -6,6 +6,7 @@ keywords = ["Windows","SCM"]
 description = "Windows service API"
 edition = "2021"
 license = "MIT"
+repository = "https://github.com/TomzBench/msft"
 
 [dependencies]
 msft-service = "0.0.22"
