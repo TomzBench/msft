@@ -1,6 +1,6 @@
 [package]
 name = "msft-service"
-version = "0.0.22"
+version = "0.0.24"
 authors = ["Thomas Chiantia <thomas@altronix.com>"]
 keywords = ["Windows","SCM"]
 description = "Windows service API"
@@ -8,12 +8,8 @@ edition = "2021"
 license = "MIT"
 
 [dependencies.msft-service-macros]
-workspace = true
-# version = "0.0.22"
-
-[dependencies.msft-runtime]
-workspace = true
-# version = "0.0.22"
+# workspace = true
+version = "0.0.24"
 
 [dependencies]
 # runtime
@@ -76,6 +72,8 @@ features = [
 mockall = "0.12"
 trybuild = "1"
 tracing-subscriber = "0.3"
+msft-runtime = { workspace = true }
+tokio-util = { version = "0.7", features = ["codec"] }
 
 [[bin]]
 name = "service"

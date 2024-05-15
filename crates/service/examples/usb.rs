@@ -1,10 +1,14 @@
 //! usbmon
-use futures::StreamExt;
+use futures::future::ready;
+use futures::{SinkExt, StreamExt, TryStreamExt};
 use msft_runtime::{
-    codec::lines::LinesDecoder, io::ThreadpoolOptions, timer::TimerPool, usb::DeviceControlSettings,
+    timer::TimerPool,
+    usb::{self, DeviceControlSettings},
 };
-use msft_service::device::{prelude::*, NotificationRegistry};
-use std::time::Duration;
+use msft_service::device::{prelude::*, NotificationRegistry, PlugEvent};
+use std::{io, pin::pin, time::Duration};
+use tokio::fs::OpenOptions;
+use tokio_util::codec::{Framed, LinesCodec};
 use tracing::info;
 use tracing_subscriber::{filter::LevelFilter, fmt, layer::SubscriberExt, prelude::*};
 
@@ -28,43 +32,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create a timer to signal end of our application
     let mut timers = TimerPool::new(&Default::default())?;
-    let stop = timers.oneshot(Duration::from_secs(2)).await;
+    let _stop = timers.oneshot(Duration::from_secs(2)).await;
 
     // Look for a single event associated with vendor/product of interest
-    let port = NotificationRegistry::with_capacity(3)
+    let fut = NotificationRegistry::with_capacity(3)
         .with(NotificationRegistry::WCEUSBS)
         .with(NotificationRegistry::USBDEVICE)
         .with(NotificationRegistry::PORTS)
         .start("MyDeviceNotifications")?
         .filter_for_ids(vec![("2FE3", "0001")])?
-        .try_open(|port, _, _, _| {
-            port.configure(DeviceControlSettings::default())?
-                .run(ThreadpoolOptions {
-                    environment: None,
-                    decoder: LinesDecoder::default(),
-                    capacity: 4095,
-                    queue: 8,
-                })
-                .map_err(|e| e.into())
+        .filter_map(|ev| match ev {
+            Ok(PlugEvent::Plug { port, ids }) => ready(Some(Ok((port, ids)))),
+            Ok(PlugEvent::Unplug { .. }) => ready(None),
+            Err(e) => ready(Some(Err(io::Error::from(e)))),
         })
-        .next()
-        .await
-        .unwrap()?;
+        .and_then(|(port, _)| async {
+            OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .open(port)
+                .await
+        })
+        .and_then(|port| ready(usb::configure(port, DeviceControlSettings::default())));
+    let file = pin!(fut).next().await.unwrap()?;
 
-    // Get the reader writer handles to begin I/O and write some Hello's
-    let (mut reader, mut writer) = port.reader_writer();
-    writer.write("hello\r\n").await?;
-    writer.write("world\r\n").await?;
-
-    // Setup a stream and read/write in a loop
-    let mut stream = reader.stream().await.take_until(stop.start());
-    let mut count = 0;
-    while let Some(line) = stream.next().await {
-        info!(line = line?, "received incoming");
-        count += 1;
-        writer.write(format!("Hello {count}\r\n").as_str()).await?;
-    }
-
-    info!("demo finished");
+    let mut io = Framed::new(file, LinesCodec::new());
+    io.send("hello").await?;
+    let response = io.next().await.unwrap()?;
+    info!(response, "demo over");
     Ok(())
 }

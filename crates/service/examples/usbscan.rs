@@ -1,8 +1,10 @@
 //! usb scan
 
 use futures::StreamExt;
-use msft_runtime::{codec::lines::LinesDecoder, io::ThreadpoolOptions, usb::DeviceControlSettings};
-use msft_service::device::{prelude::*, NotificationRegistry};
+use futures::{future::ready, TryStreamExt};
+use msft_service::device::{prelude::*, NotificationRegistry, PlugEvent};
+use std::{io, pin::pin};
+use tokio::fs::OpenOptions;
 use tracing::{debug, info};
 use tracing_subscriber::{filter::LevelFilter, fmt, layer::SubscriberExt, prelude::*};
 
@@ -31,19 +33,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with(NotificationRegistry::PORTS)
         .start("MyDeviceNotifications")?
         .filter_for_ids(vec![("2FE3", "0001")])?
-        .try_open(|port, _, _, _| {
-            port.configure(DeviceControlSettings::default())?
-                .run(ThreadpoolOptions {
-                    environment: None,
-                    decoder: LinesDecoder::default(),
-                    capacity: 4095,
-                    queue: 8,
-                })
-                .map_err(|e| e.into())
+        .filter_map(|ev| match ev {
+            Ok(PlugEvent::Plug { port, ids }) => ready(Some(Ok((port, ids)))),
+            Ok(PlugEvent::Unplug { .. }) => ready(None),
+            Err(e) => ready(Some(Err(io::Error::from(e)))),
+        })
+        .and_then(|(port, _)| async {
+            OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .open(port)
+                .await
         })
         .take(4);
 
-    while let Some(ev) = stream.next().await {
+    let mut pinned = pin!(stream);
+    while let Some(ev) = pinned.next().await {
         // Log the event
         debug!(ok = ev.is_ok(), "found usb event");
     }
