@@ -170,6 +170,7 @@ where
     {
         worker.start();
         let result = self.read_overlapped(overlapped, bytes);
+        debug!(?result, "read overlapped result");
         match result {
             Err(OverlappedError::Pending) => Err(OverlappedError::Pending),
             Err(e) => {

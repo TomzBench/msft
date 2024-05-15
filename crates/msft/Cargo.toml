@@ -8,8 +8,10 @@ edition = "2021"
 license = "MIT"
 
 [dependencies]
-msft-service = "0.0.22"
-msft-runtime = "0.0.22"
+# msft-service = "0.0.22"
+# msft-runtime = "0.0.22"
+msft-service = { workspace = true }
+msft-runtime = { workspace = true }
 
 # Windows dependencies
 [target.'cfg(windows)'.dependencies.windows-sys]
