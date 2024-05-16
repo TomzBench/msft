@@ -1,10 +1,8 @@
 //! usb scan
 
-use futures::StreamExt;
-use futures::{future::ready, TryStreamExt};
-use msft_service::device::{prelude::*, NotificationRegistry, PlugEvent};
-use std::{io, pin::pin};
-use tokio::fs::OpenOptions;
+use futures::{future, StreamExt};
+use msft_service::device::{plug_events, prelude::*, NotificationRegistry};
+use std::pin::pin;
 use tracing::{debug, info};
 use tracing_subscriber::{filter::LevelFilter, fmt, layer::SubscriberExt, prelude::*};
 
@@ -26,32 +24,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Welcome message
     info!("Application service starting...");
 
-    // Look for a single event associated with vendor/product of interest
-    let mut stream = NotificationRegistry::with_capacity(3)
-        .with(NotificationRegistry::WCEUSBS)
-        .with(NotificationRegistry::USBDEVICE)
-        .with(NotificationRegistry::PORTS)
-        .start("MyDeviceNotifications")?
-        .filter_for_ids(vec![("2FE3", "0001")])?
-        .filter_map(|ev| match ev {
-            Ok(PlugEvent::Plug { port, ids }) => ready(Some(Ok((port, ids)))),
-            Ok(PlugEvent::Unplug { .. }) => ready(None),
-            Err(e) => ready(Some(Err(io::Error::from(e)))),
-        })
-        .and_then(|(port, _)| async {
-            OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .open(port)
-                .await
-        })
-        .take(4);
+    // Create a handle to listen for device events
+    let scanner = NotificationRegistry::new()
+        .with_serial_port()
+        .spawn("MyDeviceNotifications")?;
+
+    scanner.scan()?.scan()?.scan()?;
+
+    // create a stream to listen for usb plug/unplug events
+    let stream = scanner
+        .listen()
+        .filter_map(|ev| future::ready(plug_events(ev)))
+        .track(vec![("2FE3", "0100")])?
+        .take(3);
 
     let mut pinned = pin!(stream);
-    while let Some(ev) = pinned.next().await {
+    while let Some(tracking) = pinned.next().await {
         // Log the event
-        debug!(ok = ev.is_ok(), "found usb event");
+        let port = tracking?.port;
+        debug!(?port, "found usb event");
     }
 
     Ok(())

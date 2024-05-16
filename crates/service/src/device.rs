@@ -6,19 +6,25 @@
 //! from the context of a windows service. For example, some services during development will run
 //! in as a console application.
 
-use crate::message::{DeviceEventData, DeviceEventType};
-use crate::util::hkey::{RegistryData, UnexpectedRegistryData};
-use crate::util::wchar::{from_wide, to_wide};
-use crate::{guid, message::DeviceEvent, status::StatusHandle};
+use crate::{
+    guid,
+    message::DeviceEvent,
+    message::{DeviceEventData, DeviceEventType},
+    status::StatusHandle,
+    util::{
+        hkey::{RegistryData, UnexpectedRegistryData},
+        wait::{self, Receiver, Sender, WaitResult},
+        wchar::{from_wide, to_wide},
+    },
+};
 use crossbeam::queue::SegQueue;
-use futures::Stream;
+use futures::{ready, Future, Stream};
 use parking_lot::Mutex;
 use pin_project_lite::pin_project;
 use std::{
     borrow::Cow,
     cell::OnceCell,
     collections::HashMap,
-    error,
     ffi::OsString,
     fmt::{self, Formatter},
     io,
@@ -29,7 +35,7 @@ use std::{
     task::{Context, Poll, Waker},
     thread::JoinHandle,
 };
-use tracing::{debug, error, trace};
+use tracing::{debug, error, trace, warn};
 use windows_sys::{
     core::GUID,
     Win32::{Foundation::*, System::LibraryLoader::GetModuleHandleW, UI::WindowsAndMessaging::*},
@@ -50,14 +56,14 @@ unsafe extern "system" fn device_notification_window_proceedure(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-    let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const Mutex<DeviceNotificationData>;
+    let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const DeviceNotificationData;
     if !ptr.is_null() {
         match msg {
             // Safety: lparam is a DEV_BROADCAST_HDR when msg is WM_DEVICECHANGE
             WM_DEVICECHANGE => match unsafe { DeviceEvent::try_parse(wparam as _, lparam as _) } {
                 Some(msg) => {
                     debug!(?msg.ty);
-                    (&*ptr).lock().try_wake_with(Some(msg));
+                    (&*ptr).try_wake_with(Some(msg));
                     0
                 }
                 _ => DefWindowProcW(hwnd, msg, wparam, lparam),
@@ -66,8 +72,8 @@ unsafe extern "system" fn device_notification_window_proceedure(
                 if let Ok(window) = crate::get_window_text!(hwnd, 128) {
                     trace!(?window, "wm_destroy");
                 }
-                let arc = Arc::from_raw(ptr as *const Mutex<DeviceNotificationData>);
-                arc.lock().try_wake_with(None);
+                let arc = Arc::from_raw(ptr as *const DeviceNotificationData);
+                arc.try_wake_with(None);
                 0
             }
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
@@ -80,7 +86,7 @@ unsafe extern "system" fn device_notification_window_proceedure(
 /// Create an instance of a DeviceNotifier window.
 ///
 /// Safety: name must be a null terminated Wide string, and user_data must be a pointer to an
-/// Arc<Mutex<DeviceNotificationData>>;
+/// Arc<DeviceNotificationData>;
 unsafe fn create_device_notification_window(
     name: *const u16,
     user_data: isize,
@@ -124,7 +130,7 @@ unsafe fn create_device_notification_window(
 ///
 /// We receive a "name", a list of GUID registrations, and some "user_data" which is an arc.
 ///
-/// Safety: user_data must be a pointer to an Arc<Mutex<DeviceNotificationData>> that was created
+/// Safety: user_data must be a pointer to an Arc<DeviceNotificationData> that was created
 /// by Arc::into_raw...
 ///
 /// This method will rebuild the Arc and pass it to the window procedure...
@@ -136,7 +142,7 @@ unsafe fn device_notification_window_dispatcher(
     // TODO figure out how to pass atom into class name
     let _atom = get_window_class();
     let unsafe_name = to_wide(name.clone());
-    let arc = Arc::from_raw(user_data as *const Arc<Mutex<DeviceNotificationData>>);
+    let arc = Arc::from_raw(user_data as *const Arc<DeviceNotificationData>);
     trace!(?name, "starting window dispatcher");
     let hwnd = create_device_notification_window(unsafe_name.as_ptr(), Arc::as_ptr(&arc) as _)?;
     // Register the device notifications
@@ -244,60 +250,16 @@ pub fn scan_for(port: &OsString) -> Result<UsbVidPid, ScanError> {
         .ok_or_else(|| ScanError::ComPortMissingFromRegistry(port.to_owned()))
 }
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum ScanError {
-    UnexpectedRegistryData(UnexpectedRegistryData),
-    Io(io::Error),
+    #[error("unexpected registry data => {0}")]
+    UnexpectedRegistryData(#[from] UnexpectedRegistryData),
+    #[error("io error => {0}")]
+    Io(#[from] io::Error),
+    #[error("invalid registry data {0:?} {1:?}")]
     InvalidRegistryData(ParseIntError, OsString),
+    #[error("com port {0:?} missing from registry")]
     ComPortMissingFromRegistry(OsString),
-}
-
-impl error::Error for ScanError {}
-impl fmt::Display for ScanError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnexpectedRegistryData(e) => e.fmt(f),
-            Self::Io(e) => e.fmt(f),
-            Self::ComPortMissingFromRegistry(port) => {
-                write!(f, "com port [{:?}] missing from registry", port)
-            }
-            Self::InvalidRegistryData(parse, data) => {
-                write!(f, "invalid registry data {:?} {parse}", data)
-            }
-        }
-    }
-}
-
-impl From<io::Error> for ScanError {
-    fn from(value: io::Error) -> Self {
-        Self::Io(value)
-    }
-}
-
-impl From<UnexpectedRegistryData> for ScanError {
-    fn from(value: UnexpectedRegistryData) -> Self {
-        Self::UnexpectedRegistryData(value)
-    }
-}
-
-impl From<ScanError> for io::Error {
-    fn from(value: ScanError) -> Self {
-        match value {
-            ScanError::Io(e) => e,
-            ScanError::UnexpectedRegistryData(e) => io::Error::new(
-                io::ErrorKind::Other,
-                format!("unexpected registry data => {:?}", e),
-            ),
-            ScanError::ComPortMissingFromRegistry(e) => io::Error::new(
-                io::ErrorKind::Other,
-                format!("com port missing from registry => {:?}", e),
-            ),
-            ScanError::InvalidRegistryData(parse, port) => io::Error::new(
-                io::ErrorKind::Other,
-                format!("invalid registry data {:?} => {:?}", port, parse),
-            ),
-        }
-    }
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -455,19 +417,26 @@ impl NotificationRegistry {
         Self(Vec::with_capacity(capacity))
     }
 
+    /// Helper to add all USB serial port notifications
+    pub fn with_serial_port(self) -> Self {
+        self.with(NotificationRegistry::WCEUSBS)
+            .with(NotificationRegistry::USBDEVICE)
+            .with(NotificationRegistry::PORTS)
+    }
+
     /// Add a GUID to the registration
     pub fn with(mut self, guid: GUID) -> Self {
         self.0.push(guid);
         self
     }
 
-    pub fn start<N>(self, n: N) -> Result<DeviceNotificationListener, ScanError>
+    pub fn spawn<N>(self, n: N) -> Result<DeviceNotificationListener, ScanError>
     where
         N: Into<OsString> + Send + Sync + 'static,
     {
         let name: OsString = n.into();
         let window = name.clone();
-        let ours = Arc::new(Mutex::new(DeviceNotificationData::new()?));
+        let ours = Arc::new(DeviceNotificationData::new()?);
         let theirs = Arc::clone(&ours);
         let join_handle = std::thread::spawn(move || unsafe {
             device_notification_window_dispatcher(name, self, Arc::into_raw(theirs) as _)
@@ -509,7 +478,7 @@ impl NotificationRegistry {
 
 struct DeviceNotificationData {
     queue: SegQueue<Option<DeviceEvent>>,
-    waker: Option<Waker>,
+    waker: Mutex<Option<Waker>>,
 }
 
 impl DeviceNotificationData {
@@ -523,31 +492,35 @@ impl DeviceNotificationData {
                 data: DeviceEventData::Port(port),
             }));
         }
-        Ok(Self { queue, waker: None })
+        Ok(Self {
+            queue,
+            waker: Mutex::new(None),
+        })
     }
 
     fn try_wake(&self) -> &Self {
-        if let Some(waker) = &self.waker {
+        if let Some(waker) = &self.waker.lock().as_ref() {
             waker.wake_by_ref()
         }
         self
     }
 
-    fn try_wake_with(&mut self, ev: Option<DeviceEvent>) -> &mut Self {
+    fn try_wake_with(&self, ev: Option<DeviceEvent>) -> &Self {
         self.queue.push(ev);
         self.try_wake();
         self
     }
 
-    fn register(&mut self, context: &Context<'_>) {
+    fn register(&self, context: &Context<'_>) {
         let new_waker = context.waker();
-        match self.waker.take() {
-            None => self.waker = Some(new_waker.clone()),
+        let mut waker = self.waker.lock();
+        *waker = match waker.take() {
+            None => Some(new_waker.clone()),
             Some(old_waker) => {
                 if old_waker.will_wake(new_waker) {
-                    self.waker = Some(old_waker)
+                    Some(old_waker)
                 } else {
-                    self.waker = Some(new_waker.clone())
+                    Some(new_waker.clone())
                 }
             }
         }
@@ -560,12 +533,28 @@ pub struct DeviceNotificationListener {
     window: OsString,
     /// Registered notifications, stored here to prevent drops
     /// Shared state with window procedure to create a stream of device notifications
-    context: Arc<Mutex<DeviceNotificationData>>,
+    context: Arc<DeviceNotificationData>,
     /// Handle to a window dispatcher
     join_handle: Option<JoinHandle<io::Result<()>>>,
 }
 
 impl DeviceNotificationListener {
+    pub fn listen(&self) -> DeviceNotificationStream {
+        DeviceNotificationStream(Arc::clone(&self.context))
+    }
+
+    pub fn scan(&self) -> Result<&Self, ScanError> {
+        let devices = self::scan()?;
+        for (port, _) in devices.into_iter() {
+            debug!(?port, "found USB device");
+            self.context.queue.push(Some(DeviceEvent {
+                ty: DeviceEventType::Arrival,
+                data: DeviceEventData::Port(port),
+            }));
+        }
+        Ok(self)
+    }
+
     pub fn close(&mut self) -> io::Result<()> {
         // Find the window so we can close it
         trace!(window = ?self.window, "closing device notification listener");
@@ -608,18 +597,15 @@ impl Drop for DeviceNotificationListener {
     }
 }
 
-impl Stream for DeviceNotificationListener {
+pub struct DeviceNotificationStream(Arc<DeviceNotificationData>);
+
+impl Stream for DeviceNotificationStream {
     type Item = DeviceEvent;
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let mut context = self.context.lock();
-        context.register(cx);
-        debug!(
-            len = context.queue.len(),
-            waker = context.waker.is_some(),
-            "DeviceNotificationListener poll"
-        );
+        self.0.register(cx);
+        debug!(len = self.0.queue.len(), "DeviceNotificationListener poll");
 
-        match context.queue.pop() {
+        match self.0.queue.pop() {
             None => Poll::Pending,
             Some(Some(inner)) => {
                 debug!(ev=?inner.ty, "usb event");
@@ -635,64 +621,135 @@ impl Stream for DeviceNotificationListener {
 
 #[derive(Debug)]
 pub enum PlugEvent {
-    Plug { port: OsString, ids: UsbVidPid },
-    Unplug { port: OsString },
+    Plug(OsString),
+    Unplug(OsString),
+}
+
+pub fn plug_events(ev: DeviceEvent) -> Option<PlugEvent> {
+    match ev {
+        DeviceEvent {
+            ty: DeviceEventType::Arrival,
+            data: DeviceEventData::Port(port),
+        } => Some(PlugEvent::Plug(port)),
+        DeviceEvent {
+            ty: DeviceEventType::RemoveComplete,
+            data: DeviceEventData::Port(port),
+        } => Some(PlugEvent::Unplug(port)),
+        _ => None,
+    }
 }
 
 pin_project! {
-    #[project = FilterForIdsProj]
-    #[project_replace = FilterForIdsProjReplace]
+    #[project = UnpluggedProj]
+    #[project_replace = UnpluggedProjReplace]
     #[derive(Debug)]
     #[must_use = "futures do nothing unless you `.await` or poll them"]
-    pub enum FilterForIds<St> {
-        Streaming {
+    pub enum Unplugged {
+        Waiting {
             #[pin]
-            inner: St,
-            ids: Vec<UsbVidPid>,
+            inner: Receiver,
         },
         Complete
     }
 }
 
-impl<St> Stream for FilterForIds<St>
+impl Future for Unplugged {
+    type Output = WaitResult;
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.as_mut().project() {
+            UnpluggedProj::Waiting { inner } => {
+                let result = ready!(inner.poll(cx));
+                self.project_replace(Unplugged::Complete);
+                Poll::Ready(result)
+            }
+            UnpluggedProj::Complete => panic!("Unplugged cannot be polled after complete"),
+        }
+    }
+}
+
+/// A tracked port emitted from the [`DeviceStreamExt::track`]
+#[derive(Debug)]
+pub struct TrackedPort {
+    /// The com port name. IE: COM4
+    pub port: OsString,
+    /// The Vendor/Product ID's of the serial port
+    pub ids: UsbVidPid,
+    /// A future which resolves when the COM port is unplugged
+    pub unplugged: Unplugged,
+}
+
+impl TrackedPort {
+    pub fn track(port: OsString, ids: UsbVidPid) -> io::Result<(Sender, TrackedPort)> {
+        let (sender, receiver) = wait::oneshot()?;
+        let port = TrackedPort {
+            port,
+            ids,
+            unplugged: Unplugged::Waiting { inner: receiver },
+        };
+        Ok((sender, port))
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum TrackingError {
+    #[error("io error => {0}")]
+    Io(#[from] io::Error),
+    #[error("scan error => {0}")]
+    Scan(#[from] ScanError),
+}
+
+pin_project! {
+    #[project = TrackingProj]
+    #[project_replace = TrackingProjReplace]
+    #[derive(Debug)]
+    #[must_use = "futures do nothing unless you `.await` or poll them"]
+    pub enum Tracking<St> {
+        Streaming {
+            #[pin]
+            inner: St,
+            ids: Vec<UsbVidPid>,
+            cache: HashMap<OsString, Sender>
+        },
+        Complete
+    }
+}
+
+impl<St> Stream for Tracking<St>
 where
-    St: Stream<Item = DeviceEvent>,
+    St: Stream<Item = PlugEvent>,
 {
-    type Item = Result<PlugEvent, ScanError>;
+    type Item = Result<TrackedPort, TrackingError>;
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         loop {
             match self.as_mut().project() {
-                FilterForIdsProj::Streaming { inner, ids } => match inner.poll_next(cx) {
+                TrackingProj::Streaming { inner, ids, cache } => match inner.poll_next(cx) {
                     Poll::Pending => break Poll::Pending,
-                    Poll::Ready(Some(DeviceEvent {
-                        ty: DeviceEventType::Arrival,
-                        data: DeviceEventData::Port(port),
-                        ..
-                    })) => {
-                        if let Ok(Some(scan)) = scan_for(&port).map(|scan| {
-                            ids.iter().find_map(|id| match id {
-                                value if *value == scan => Some(scan),
-                                _ => None,
-                            })
-                        }) {
-                            debug!(?port, ?scan, "found usb device");
-                            break Poll::Ready(Some(Ok(PlugEvent::Plug { port, ids: scan })));
-                        } else {
-                            debug!(?port, "ignoring usb device");
-                        }
-                    }
-                    Poll::Ready(Some(DeviceEvent {
-                        ty: DeviceEventType::RemoveComplete,
-                        data: DeviceEventData::Port(port),
-                        ..
-                    })) => break Poll::Ready(Some(Ok(PlugEvent::Unplug { port }))),
-                    Poll::Ready(Some(_)) => break Poll::Pending,
                     Poll::Ready(None) => {
                         self.project_replace(Self::Complete);
                         break Poll::Ready(None);
                     }
+                    Poll::Ready(Some(PlugEvent::Plug(port))) => match scan_for(&port) {
+                        Err(e) => break Poll::Ready(Some(Err(e.into()))),
+                        Ok(id) => match ids.iter().find(|test| **test == id) {
+                            None => debug!(?port, ?id, "ignoring com device"),
+                            Some(id) => match TrackedPort::track(port.clone(), *id) {
+                                Err(e) => break Poll::Ready(Some(Err(e.into()))),
+                                Ok((sender, tracked)) => {
+                                    cache.insert(port.clone(), sender);
+                                    break Poll::Ready(Some(Ok(tracked)));
+                                }
+                            },
+                        },
+                    },
+                    Poll::Ready(Some(PlugEvent::Unplug(port))) => match cache.remove(&port) {
+                        None => warn!(?port, "untracked port"),
+                        Some(ids) => match ids.set() {
+                            Ok(_) => debug!(?port, "unplugged signal sent"),
+                            Err(e) => break Poll::Ready(Some(Err(e.into()))),
+                        },
+                    },
                 },
-                FilterForIdsProj::Complete => {
+                TrackingProj::Complete => {
                     panic!("Watch must not be polled after stream has finished")
                 }
             }
@@ -700,24 +757,26 @@ where
     }
 }
 
-pub trait DeviceStreamExt: Stream<Item = DeviceEvent> {
-    fn filter_for_ids<'v, 'p, V, P>(
-        self,
-        ids: Vec<(V, P)>,
-    ) -> Result<FilterForIds<Self>, ParseIntError>
+pub trait DeviceStreamExt: Stream<Item = PlugEvent> {
+    fn track<'v, 'p, V, P>(self, ids: Vec<(V, P)>) -> Result<Tracking<Self>, ParseIntError>
     where
         V: Into<Cow<'v, str>>,
         P: Into<Cow<'p, str>>,
         Self: Sized,
     {
-        ids.into_iter()
+        let collection = ids
+            .into_iter()
             .map(UsbVidPid::try_from)
-            .collect::<Result<Vec<UsbVidPid>, ParseIntError>>()
-            .map(|ids| FilterForIds::Streaming { inner: self, ids })
+            .collect::<Result<Vec<UsbVidPid>, ParseIntError>>()?;
+        Ok(Tracking::Streaming {
+            inner: self,
+            ids: collection,
+            cache: HashMap::new(),
+        })
     }
 }
 
-impl<T: ?Sized> DeviceStreamExt for T where T: Stream<Item = DeviceEvent> {}
+impl<T: ?Sized> DeviceStreamExt for T where T: Stream<Item = PlugEvent> {}
 
 pub mod prelude {
     pub use super::DeviceStreamExt;
