@@ -1,9 +1,9 @@
 //! usb scan
 
 use futures::StreamExt;
-use futures::{future::ready, TryStreamExt};
-use msft_service::device::{prelude::*, NotificationRegistry, PlugEvent};
-use std::{io, pin::pin};
+use futures::TryStreamExt;
+use msft_service::device::{plug_events, prelude::*, TrackingError};
+use std::pin::pin;
 use tokio::fs::OpenOptions;
 use tracing::{debug, info};
 use tracing_subscriber::{filter::LevelFilter, fmt, layer::SubscriberExt, prelude::*};
@@ -27,24 +27,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Application service starting...");
 
     // Look for a single event associated with vendor/product of interest
-    let mut stream = NotificationRegistry::with_capacity(3)
-        .with(NotificationRegistry::WCEUSBS)
-        .with(NotificationRegistry::USBDEVICE)
-        .with(NotificationRegistry::PORTS)
-        .start("MyDeviceNotifications")?
-        .filter_for_ids(vec![("2FE3", "0001")])?
-        .filter_map(|ev| match ev {
-            Ok(PlugEvent::Plug { port, ids }) => ready(Some(Ok((port, ids)))),
-            Ok(PlugEvent::Unplug { .. }) => ready(None),
-            Err(e) => ready(Some(Err(io::Error::from(e)))),
-        })
-        .and_then(|(port, _)| async {
+    let mut stream = plug_events("MyDeviceNotifications")?
+        .track(vec![("2FE3", "0001")])?
+        .and_then(|tracked| async {
             OpenOptions::new()
                 .read(true)
                 .write(true)
                 .create(true)
-                .open(port)
+                .open(tracked.port)
                 .await
+                .map_err(TrackingError::from)
         })
         .take(4);
 

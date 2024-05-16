@@ -3,6 +3,7 @@
 #[cfg(test)]
 mod tests;
 
+pub mod wait;
 pub mod guid;
 pub mod hkey;
 pub mod macros;
