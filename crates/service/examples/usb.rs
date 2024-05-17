@@ -1,7 +1,7 @@
 //! usbmon
-use futures::StreamExt;
+use futures::{future, StreamExt};
 use msft_service::{
-    device::{plug_events, prelude::*, TrackingError},
+    device::{plug_events, prelude::*, NotificationRegistry, TrackingError},
     util::wait,
 };
 use std::pin::pin;
@@ -33,9 +33,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Signal to receive a port
     let (tx, rx) = tokio::sync::oneshot::channel();
 
-    // Create a stream to listen for USB plug/unplug events
-    let stream = plug_events("MyDeviceNotifications")?
+    // Create a handle to listen for device events
+    let scanner = NotificationRegistry::new()
+        .with_serial_port()
+        .spawn("MyDeviceNotifications")?;
+
+    // create a stream to listen for usb plug/unplug events
+    let stream = scanner
+        .listen()
         .take_until(abort)
+        .filter_map(|ev| future::ready(plug_events(ev)))
         .track(vec![("2FE3", "0100")])?;
 
     // Spawn a task to listen for USB plug/unplug events

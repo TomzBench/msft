@@ -18,7 +18,7 @@ use crate::{
     },
 };
 use crossbeam::queue::SegQueue;
-use futures::{future, ready, Future, Stream, StreamExt};
+use futures::{ready, Future, Stream};
 use parking_lot::Mutex;
 use pin_project_lite::pin_project;
 use std::{
@@ -417,13 +417,20 @@ impl NotificationRegistry {
         Self(Vec::with_capacity(capacity))
     }
 
+    /// Helper to add all USB serial port notifications
+    pub fn with_serial_port(self) -> Self {
+        self.with(NotificationRegistry::WCEUSBS)
+            .with(NotificationRegistry::USBDEVICE)
+            .with(NotificationRegistry::PORTS)
+    }
+
     /// Add a GUID to the registration
     pub fn with(mut self, guid: GUID) -> Self {
         self.0.push(guid);
         self
     }
 
-    pub fn start<N>(self, n: N) -> Result<DeviceNotificationListener, ScanError>
+    pub fn spawn<N>(self, n: N) -> Result<DeviceNotificationListener, ScanError>
     where
         N: Into<OsString> + Send + Sync + 'static,
     {
@@ -532,6 +539,22 @@ pub struct DeviceNotificationListener {
 }
 
 impl DeviceNotificationListener {
+    pub fn listen(&self) -> DeviceNotificationStream {
+        DeviceNotificationStream(Arc::clone(&self.context))
+    }
+
+    pub fn scan(&self) -> Result<&Self, ScanError> {
+        let devices = self::scan()?;
+        for (port, _) in devices.into_iter() {
+            debug!(?port, "found USB device");
+            self.context.queue.push(Some(DeviceEvent {
+                ty: DeviceEventType::Arrival,
+                data: DeviceEventData::Port(port),
+            }));
+        }
+        Ok(self)
+    }
+
     pub fn close(&mut self) -> io::Result<()> {
         // Find the window so we can close it
         trace!(window = ?self.window, "closing device notification listener");
@@ -574,16 +597,15 @@ impl Drop for DeviceNotificationListener {
     }
 }
 
-impl Stream for DeviceNotificationListener {
+pub struct DeviceNotificationStream(Arc<DeviceNotificationData>);
+
+impl Stream for DeviceNotificationStream {
     type Item = DeviceEvent;
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.context.register(cx);
-        debug!(
-            len = self.context.queue.len(),
-            "DeviceNotificationListener poll"
-        );
+        self.0.register(cx);
+        debug!(len = self.0.queue.len(), "DeviceNotificationListener poll");
 
-        match self.context.queue.pop() {
+        match self.0.queue.pop() {
             None => Poll::Pending,
             Some(Some(inner)) => {
                 debug!(ev=?inner.ty, "usb event");
@@ -603,7 +625,7 @@ pub enum PlugEvent {
     Unplug(OsString),
 }
 
-pub fn plug_events_filter(ev: DeviceEvent) -> Option<PlugEvent> {
+pub fn plug_events(ev: DeviceEvent) -> Option<PlugEvent> {
     match ev {
         DeviceEvent {
             ty: DeviceEventType::Arrival,
@@ -615,18 +637,6 @@ pub fn plug_events_filter(ev: DeviceEvent) -> Option<PlugEvent> {
         } => Some(PlugEvent::Unplug(port)),
         _ => None,
     }
-}
-
-pub fn plug_events<N>(name: N) -> Result<impl Stream<Item = PlugEvent>, ScanError>
-where
-    N: Into<OsString> + Send + Sync + 'static,
-{
-    Ok(NotificationRegistry::with_capacity(3)
-        .with(NotificationRegistry::WCEUSBS)
-        .with(NotificationRegistry::USBDEVICE)
-        .with(NotificationRegistry::PORTS)
-        .start(name)?
-        .filter_map(|ev| future::ready(plug_events_filter(ev))))
 }
 
 pin_project! {
