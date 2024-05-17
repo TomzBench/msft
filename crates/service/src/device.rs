@@ -56,7 +56,7 @@ unsafe extern "system" fn device_notification_window_proceedure(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-    let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const Mutex<DeviceNotificationData>;
+    let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const DeviceNotificationData;
     if !ptr.is_null() {
         match msg {
             // Safety: lparam is a DEV_BROADCAST_HDR when msg is WM_DEVICECHANGE
@@ -86,7 +86,7 @@ unsafe extern "system" fn device_notification_window_proceedure(
 /// Create an instance of a DeviceNotifier window.
 ///
 /// Safety: name must be a null terminated Wide string, and user_data must be a pointer to an
-/// Arc<Mutex<DeviceNotificationData>>;
+/// Arc<DeviceNotificationData>;
 unsafe fn create_device_notification_window(
     name: *const u16,
     user_data: isize,
@@ -130,7 +130,7 @@ unsafe fn create_device_notification_window(
 ///
 /// We receive a "name", a list of GUID registrations, and some "user_data" which is an arc.
 ///
-/// Safety: user_data must be a pointer to an Arc<Mutex<DeviceNotificationData>> that was created
+/// Safety: user_data must be a pointer to an Arc<DeviceNotificationData> that was created
 /// by Arc::into_raw...
 ///
 /// This method will rebuild the Arc and pass it to the window procedure...
@@ -142,7 +142,7 @@ unsafe fn device_notification_window_dispatcher(
     // TODO figure out how to pass atom into class name
     let _atom = get_window_class();
     let unsafe_name = to_wide(name.clone());
-    let arc = Arc::from_raw(user_data as *const Arc<Mutex<DeviceNotificationData>>);
+    let arc = Arc::from_raw(user_data as *const Arc<DeviceNotificationData>);
     trace!(?name, "starting window dispatcher");
     let hwnd = create_device_notification_window(unsafe_name.as_ptr(), Arc::as_ptr(&arc) as _)?;
     // Register the device notifications
@@ -429,7 +429,7 @@ impl NotificationRegistry {
     {
         let name: OsString = n.into();
         let window = name.clone();
-        let ours = Arc::new(Mutex::new(DeviceNotificationData::new()?));
+        let ours = Arc::new(DeviceNotificationData::new()?);
         let theirs = Arc::clone(&ours);
         let join_handle = std::thread::spawn(move || unsafe {
             device_notification_window_dispatcher(name, self, Arc::into_raw(theirs) as _)
@@ -471,7 +471,7 @@ impl NotificationRegistry {
 
 struct DeviceNotificationData {
     queue: SegQueue<Option<DeviceEvent>>,
-    waker: Option<Waker>,
+    waker: Mutex<Option<Waker>>,
 }
 
 impl DeviceNotificationData {
@@ -485,11 +485,14 @@ impl DeviceNotificationData {
                 data: DeviceEventData::Port(port),
             }));
         }
-        Ok(Self { queue, waker: None })
+        Ok(Self {
+            queue,
+            waker: Mutex::new(None),
+        })
     }
 
     fn try_wake(&self) -> &Self {
-        if let Some(waker) = &self.waker {
+        if let Some(waker) = &self.waker.lock().as_ref() {
             waker.wake_by_ref()
         }
         self
@@ -501,15 +504,16 @@ impl DeviceNotificationData {
         self
     }
 
-    fn register(&mut self, context: &Context<'_>) {
+    fn register(&self, context: &Context<'_>) {
         let new_waker = context.waker();
-        match self.waker.take() {
-            None => self.waker = Some(new_waker.clone()),
+        let mut waker = self.waker.lock();
+        *waker = match waker.take() {
+            None => Some(new_waker.clone()),
             Some(old_waker) => {
                 if old_waker.will_wake(new_waker) {
-                    self.waker = Some(old_waker)
+                    Some(old_waker)
                 } else {
-                    self.waker = Some(new_waker.clone())
+                    Some(new_waker.clone())
                 }
             }
         }
@@ -522,7 +526,7 @@ pub struct DeviceNotificationListener {
     window: OsString,
     /// Registered notifications, stored here to prevent drops
     /// Shared state with window procedure to create a stream of device notifications
-    context: Arc<Mutex<DeviceNotificationData>>,
+    context: Arc<DeviceNotificationData>,
     /// Handle to a window dispatcher
     join_handle: Option<JoinHandle<io::Result<()>>>,
 }
@@ -573,15 +577,13 @@ impl Drop for DeviceNotificationListener {
 impl Stream for DeviceNotificationListener {
     type Item = DeviceEvent;
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let mut context = self.context.lock();
-        context.register(cx);
+        self.context.register(cx);
         debug!(
-            len = context.queue.len(),
-            waker = context.waker.is_some(),
+            len = self.context.queue.len(),
             "DeviceNotificationListener poll"
         );
 
-        match context.queue.pop() {
+        match self.context.queue.pop() {
             None => Poll::Pending,
             Some(Some(inner)) => {
                 debug!(ev=?inner.ty, "usb event");
