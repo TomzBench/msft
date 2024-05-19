@@ -20,7 +20,7 @@ use windows_sys::Win32::{
     Devices::Communication::*,
     Foundation::{GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE},
     Storage::FileSystem::{CreateFileW, FILE_FLAG_OVERLAPPED, OPEN_EXISTING},
-    System::WindowsProgramming::*,
+    System::{SystemServices::MAXWORD, WindowsProgramming::*},
 };
 
 pub struct OpenWork {
@@ -420,9 +420,11 @@ impl UsbHandle {
 
         // Set timeouts
         let timeouts = COMMTIMEOUTS {
-            ReadIntervalTimeout: 50,
-            ReadTotalTimeoutMultiplier: 0,
-            ReadTotalTimeoutConstant: 0,
+            ReadIntervalTimeout: MAXWORD,
+            ReadTotalTimeoutMultiplier: MAXWORD,
+            // ReadIntervalTimeout: 0,
+            // ReadTotalTimeoutMultiplier: 0,
+            ReadTotalTimeoutConstant: 1000,
             WriteTotalTimeoutConstant: 0,
             WriteTotalTimeoutMultiplier: 0,
         };
